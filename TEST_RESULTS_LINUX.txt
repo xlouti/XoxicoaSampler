@@ -1,0 +1,248 @@
+Xoxicoa Sampler v1.1 (AUTO) - Linux test results (2026-11-17 21:02 EST, JUCE 8.0.4, gcc, Release, host 48 kHz / 512)
+Built targets: VST3, Standalone, XoxicoaSamplerTest, XoxicoaSamplerUISnapshot
+Material: synthetic beats (known BPM, key and onsets) written as 44.1 kHz files, a 440 Hz tone file, ffmpeg-made AIFF/MP3/FLAC.
+AUTO rolls use fresh seeds, so strategy names and demo files differ between runs; the knob audit uses a fixed roll.
+
+
+=== AUTO ANALYSIS (BPM / KEY / 16 CUES) on synthetic beats, files at 44.1 kHz ===
+    140 BPM 2 bars A min  -> BPM  140.0  key A min  (r=0.86)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 140 detected (140.0, exact)
+  [PASS] key A min detected (A min)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+    160 BPM 4 bars F# min -> BPM  160.0  key F# min (r=0.88)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 160 detected (160.0, exact)
+  [PASS] key F# min detected (F# min)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+     92 BPM 4 bars D maj  -> BPM   92.0  key D maj  (r=0.87)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 92 detected (92.0, exact)
+  [PASS] key D maj detected (D maj)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+     75 BPM 4 bars C min  -> BPM   75.0  key C min  (r=0.83)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 75 detected (75.0, exact)
+  [PASS] key C min detected (C min)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+    128 BPM 4 bars G maj  -> BPM  128.0  key G maj  (r=0.80)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 128 detected (128.0, exact)
+  [PASS] key G maj detected (G maj)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+    172 BPM 4 bars B min  -> BPM  172.0  key B min  (r=0.71)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 172 detected (172.0, exact)
+  [PASS] key B min detected (B min)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+    150 BPM 4 bars E min  -> BPM  150.0  key E min  (r=0.82)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 150 detected (150.0, exact)
+  [PASS] key E min detected (E min)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+    100 BPM 4 bars F maj  -> BPM  100.0  key F maj  (r=0.94)  cues on a real onset: 16/16, worst error 1.0 ms
+  [PASS] BPM 100 detected (100.0, exact)
+  [PASS] key F maj detected (F maj)
+  [PASS] 16 distinct cues, each within 10 ms of a real transient
+  BPM: 8 exact, 0 half/double-time (one click on x2 or /2), 0 wrong
+  [PASS] silent file: 16 (grid) cues, BPM unknown, no crash
+  [PASS] 100-sample file: no crash
+
+=== KEY SHIFT / TEMPO SYNC (Signalsmith Stretch), 440 Hz tone file @44.1k, host 48k ===
+  key -12 st :   220.72 Hz (want   220.00)  error  +5.6 cents  len 2.50s
+  [PASS] key shift -12 st within 8 cents
+  [PASS] finite output
+  key  -7 st :   293.64 Hz (want   293.66)  error  -0.1 cents  len 2.50s
+  [PASS] key shift -7 st within 8 cents
+  [PASS] finite output
+  key  -1 st :   416.11 Hz (want   415.30)  error  +3.3 cents  len 2.50s
+  [PASS] key shift -1 st within 8 cents
+  [PASS] finite output
+  key  +0 st :   440.02 Hz (want   440.00)  error  +0.1 cents  len 2.50s
+  [PASS] key shift 0 st within 8 cents
+  [PASS] finite output
+  key  +1 st :   466.77 Hz (want   466.16)  error  +2.3 cents  len 2.50s
+  [PASS] key shift 1 st within 8 cents
+  [PASS] finite output
+  key  +3 st :   524.66 Hz (want   523.25)  error  +4.6 cents  len 2.50s
+  [PASS] key shift 3 st within 8 cents
+  [PASS] finite output
+  key  +5 st :   588.05 Hz (want   587.33)  error  +2.1 cents  len 2.50s
+  [PASS] key shift 5 st within 8 cents
+  [PASS] finite output
+  key  +7 st :   659.25 Hz (want   659.26)  error  -0.0 cents  len 2.50s
+  [PASS] key shift 7 st within 8 cents
+  [PASS] finite output
+  key +12 st :   880.68 Hz (want   880.00)  error  +1.3 cents  len 2.50s
+  [PASS] key shift 12 st within 8 cents
+  [PASS] finite output
+  sync 140->160 BPM, key +0 : slice 0.880s (want 0.875)  pitch  439.96 Hz (want  440.00)
+  [PASS] tempo ratio 1.143 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  sync 140->160 BPM, key +5 : slice 0.880s (want 0.875)  pitch  588.03 Hz (want  587.33)
+  [PASS] tempo ratio 1.143 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  sync 160->140 BPM, key +0 : slice 1.150s (want 1.143)  pitch  439.97 Hz (want  440.00)
+  [PASS] tempo ratio 0.875 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  sync 160->140 BPM, key +5 : slice 1.150s (want 1.143)  pitch  588.06 Hz (want  587.33)
+  [PASS] tempo ratio 0.875 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  sync  60->120 BPM, key +0 : slice 0.505s (want 0.500)  pitch  439.94 Hz (want  440.00)
+  [PASS] tempo ratio 2.000 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  sync  60->120 BPM, key +5 : slice 0.505s (want 0.500)  pitch  587.97 Hz (want  587.33)
+  [PASS] tempo ratio 2.000 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  sync 120-> 90 BPM, key +0 : slice 1.340s (want 1.333)  pitch  439.97 Hz (want  440.00)
+  [PASS] tempo ratio 0.750 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  sync 120-> 90 BPM, key +5 : slice 1.340s (want 1.333)  pitch  588.07 Hz (want  587.33)
+  [PASS] tempo ratio 0.750 sets duration (+-30 ms)
+  [PASS] pitch independent of tempo (+-15 cents)
+  [PASS] sync off: duration unchanged with key +7
+  [PASS] 44.1k file in 48k host: pitch exact (direct path)
+  stretch path: note at 1000, first sound at 1008 (0.17 ms)
+  [PASS] stretch path starts on the note (outputSeek pre-roll, no latency)
+  [PASS] key target C maj from detected A min = 0 st
+  [PASS] key target A min from detected A min = 0 st
+  [PASS] key target D min from detected A min = 5 st
+  [PASS] key target E min from detected A min = -5 st
+  [PASS] key target B min from detected A min = 2 st
+  [PASS] key target F maj from detected A min = 5 st
+
+=== PAD MODES / ENVELOPES / CHOKE / CLICKS / NaN ===
+  [PASS] one-shot: plays the whole 0.5 s slice despite a 10 ms note
+  [PASS] gate: stops at note-off (0.25 s)
+  [PASS] gate: plays past later cues while held (1.2 s)
+  [PASS] loop: loops the 0.5 s slice while held (1.7 s)
+  [PASS] loop seam is click-free (max |d2| 0.0056)
+  [PASS] gate release 400 ms audibly extends the tail (0.66 s)
+  [PASS] attack 200 ms fades in (first 20 ms -24.7 dB)
+  overlap level -3.1 dB, with choke -9.0 dB
+  [PASS] choke group: pad 2 cuts pad 1
+  [PASS] choke is click-free (max |d2| 0.0162)
+  stress: 480 random notes over all modes/chokes/filters/shifts: worst |d2|/peak 0.0395, peak 0.49
+  [PASS] stress: no NaN/Inf
+  [PASS] stress: no clicks (normalised |d2| < 0.05; a hard step would be >= 0.2)
+  [PASS] all params at min and at max + 200 rapid retriggers: finite
+  [PASS] state restore: sample path, edited cue, params
+  [PASS] RESET CUES restores the detected cue points
+
+=== FILE FORMATS ===
+  [PASS] AIFF loads; BPM 140.0, key A min
+  [PASS] MP3 loads; BPM 140.0, key A min
+  [PASS] FLAC loads; BPM 140.0, key A min
+  [PASS] damaged file is rejected with a message, no crash
+
+=== PERFORMANCE (this Linux box, single core, Release) ===
+  analysis of a 3-minute track: 893 ms (background thread), BPM 150.0
+  [PASS] 3-minute analysis under 5 s
+  [PASS] long file: cues spread across the track (last cue at 179.6 s)
+   1 stretched voices (key +3, synced, looping): 1.5% of one core in real time
+   8 stretched voices (key +3, synced, looping): 12.1% of one core in real time
+  [PASS] 8 stretched voices under 60% of one core
+  12 stretched voices (key +3, synced, looping): 17.6% of one core in real time
+  worst block with a stretched pad trigger (outputSeek pre-roll): 3.22 ms of a 10.7 ms block
+  [PASS] trigger spike stays under half the block time
+
+=== DEMO WAVs ===
+  01_pads_flip_original_140.wav                peak -0.42 dBFS  finite yes
+  02_pads_flip_key_+3.wav                      peak -2.13 dBFS  finite yes
+  03_pads_flip_key_-5.wav                      peak -1.43 dBFS  finite yes
+  04_pads_flip_synced_140_to_160.wav           peak -0.20 dBFS  finite yes
+  05_pads_flip_synced_160_key_+2.wav           peak -1.80 dBFS  finite yes
+  06_pads_flip_keytarget_E_min_snap.wav        peak -1.43 dBFS  finite yes
+  07_pads_gate_mode_synced_160.wav             peak -0.29 dBFS  finite yes
+  08_loop_mode_pad1_filter_sweep_LP_to_HP.wav     finite yes
+
+=== AUTO (flip generator, versions A-F, history/undo/lock, sync) ===
+  10 rolls of version A (4 bars @140): strategies CHOP STUTTER HALF-TIME REORDER OCTAVES CHOP HALF-TIME OCTAVES STUTTER REORDER
+  pairwise audio difference (dB re. RMS; 0 dB = as loud as the music itself, -inf = identical):
+         #1     #2     #3     #4     #5     #6     #7     #8     #9     #10  
+   #1      --   +2.1   +1.5   +1.3   +1.9   +1.7   +1.5   +2.1   +1.3   +1.7
+   #2             --   +1.0   +0.9   +1.3   +0.3   +1.0   +1.2   +0.4   +0.9
+   #3                    --   +0.5   +1.4   +1.0   -0.8   +1.9   +1.3   +1.4
+   #4                           --   +0.8   +0.4   +0.2   +0.4   -0.5   +0.2
+   #5                                  --   +1.2   +1.1   +1.9   +1.7   +1.4
+   #6                                         --   +1.7   +2.0   +2.1   +1.6
+   #7                                                --   +1.7   +0.9   +1.0
+   #8                                                       --   +1.7   +1.1
+   #9                                                              --   -0.1
+   #10                                                                    --
+  audio: min -0.8 dB, mean +1.1 dB over 45 pairs; pattern: min 91% / mean 99% of hit cells differ
+  [PASS] 10 consecutive rolls are all clearly different (every pair > -6 dB)
+  [PASS] every pair of rolls differs in > 50% of hit cells (onset, chop, FX or pitch)
+  versions A-F of one roll: min pairwise -0.2 dB
+  [PASS] versions A-F are distinct flips
+  140 BPM: 1/2 Bar 0.8571s (5 cycles, max err 0.57 smp)  1 Bar 1.7143s (5 cycles, max err 0.86 smp)  2 Bars 3.4286s (5 cycles, max err 0.71 smp)  4 Bars 6.8571s (4 cycles, max err 0.43 smp)  8 Bars 13.7143s (3 cycles, max err 0.57 smp)  16 Bars 27.4286s (3 cycles, max err 0.57 smp)  
+  [PASS] all 6 Auto lengths exact at 140 BPM (cycle starts within 1 sample of n x length)
+  160 BPM: 1/2 Bar 0.7500s (5 cycles, max err 0.00 smp)  1 Bar 1.5000s (5 cycles, max err 0.00 smp)  2 Bars 3.0000s (5 cycles, max err 0.00 smp)  4 Bars 6.0000s (4 cycles, max err 0.00 smp)  8 Bars 12.0000s (3 cycles, max err 0.00 smp)  16 Bars 24.0000s (3 cycles, max err 0.00 smp)  
+  [PASS] all 6 Auto lengths exact at 160 BPM (cycle starts within 1 sample of n x length)
+  C0 trigger at 4800: first cycle start 4800, first sound 4800, after note-off -240.0 dBFS
+  [PASS] MIDI C0 starts the Auto version on the note
+  [PASS] note-off stops it
+  [PASS] MIDI D#0 selects version D
+  latch pressed at beat 2.5: first cycle at sample 45000 (next bar line = 45000.0)
+  [PASS] AUTO PLAY starts exactly on the next host bar
+  [PASS] UNDO returns to the previous roll
+  [PASS] UNDO twice returns to the first roll
+  [PASS] HISTORY jumps forward again
+  [PASS] LOCK keeps version B through AUTO
+  [PASS] per-version re-roll changes only that version
+  [PASS] re-roll is ignored on a locked version
+  [PASS] moving cue markers re-chops the Auto version (2.5 dB)
+  key target D maj on a tone detected as A min: snap +2 st, Auto output 494.0 Hz (want 493.9)
+  [PASS] Auto version follows the project key (Key Target)
+  18 Auto renders on a sine (reverse, octaves, stutters, half-time, swing): worst |d2|/peak 0.0340
+  [PASS] Auto: no NaN/Inf
+  [PASS] Auto: no clicks (same threshold as the pad stress test)
+  [PASS] Auto 16 bars @172 on the beat: finite, never over 0 dBFS
+  auto_roll1_reorder_4bars_160bpm_Cmin_x2.wav  peak -0.02 dBFS
+  auto_roll2_octaves_4bars_160bpm_Cmin_x2.wav  peak -0.01 dBFS
+  auto_roll3_stutter_4bars_160bpm_Cmin_x2.wav  peak -1.13 dBFS
+  auto_octaves_16bars_160bpm_Cmin.wav  peak -0.03 dBFS, 24.000 s (exact 16 bars = 24.000 s)
+  [PASS] drag-out MIDI file is written and readable (Xoxicoa Auto A 4 Bars.mid)
+
+=== KNOB AUDIT (min / mid / max, every parameter; sample = 140 BPM A-min beat, host 160 BPM) ===
+Sequence: pads 1-8 over 4 bars at 160 BPM, pad 1 held for 2 beats (longer than its slice), pad 2 overlaps pad 1.
+Fixtures: pad 2 choke = group 1 (so pad 1's choke has a partner). Defaults otherwise (sync off, key 0).
+levelD = RMS change vs min; diff = RMS(render - min render) re min render; band = max octave-band change.
+FLAG (too subtle) when |level| < 1 dB AND diff < -20 dB AND band < 1.5 dB (same rule as Xoxicoa FX).
+
+  param                       lvl mid  lvl max diff mid diff max band mid band max  verdict
+  Volume                         +7.3    +26.9      6.2     26.9     35.9     56.5  ok
+                               (values: min '-36.0 dB', mid '-15.0 dB', max '6.0 dB'; peak 0.00 dBFS)
+  Key Shift                      +0.4     -0.2      3.2      3.0     38.6     37.6  ok
+                               (values: min '-12 st', mid '0 st', max '+12 st'; peak -0.06 dBFS)
+  Key Target (auto snap)         +0.1     -0.3      3.1      3.1      3.3     11.6  ok
+                               (values: min 'Off', mid 'B maj', max 'F maj'; peak -0.02 dBFS)
+  Tempo Sync (auto)              -0.4     -0.4      0.0      0.0      3.2      3.2  ok
+                               (values: min 'Off', mid 'On', max 'On'; peak -0.00 dBFS)
+  Pad Root Note                  -0.3     -2.1      1.9     -0.4      4.4      4.0  ok
+                               (values: min '36', mid '33', max '40'; peak -0.68 dBFS)
+  Pad mode                       -0.9     +0.7     -4.3     -1.2      1.6      1.3  ok
+                               (values: min 'One-Shot', mid 'Gate', max 'Loop'; peak -1.43 dBFS)
+  Pad attack                     -2.2     -8.9     -6.3     -1.6      2.2     14.9  ok
+                               (values: min '0.5 ms', mid '50.1 ms', max '500 ms'; peak -1.65 dBFS)
+  Pad release (one-shot tail)     +0.1     +2.9    -16.3     -0.8      0.6      5.6  ok
+                               (values: min '3.0 ms', mid '201 ms', max '2000 ms'; peak -0.26 dBFS)
+  Pad release (gate)             +0.3     +2.1    -11.0     -1.3      0.7      4.1  ok
+                               (values: min '3.0 ms', mid '201 ms', max '2000 ms'; peak -0.44 dBFS; fixture: pad 1 in Gate)
+  Pad filter                     +0.6     -9.1     -0.6     -0.5      2.8     18.5  ok
+                               (values: min 'LP 100%', mid 'Open', max 'HP 100%'; peak -1.65 dBFS)
+  Pad gain                       +3.0    +14.9     -1.7     14.4      9.0     23.6  ok
+                               (values: min '-24.0 dB', mid '-9.0 dB', max '6.0 dB'; peak -0.00 dBFS)
+  Pad choke group                +0.0     -0.7   -240.0     -8.0      0.0      2.5  ok
+                               (values: min 'Off', mid '2', max '1'; peak -2.20 dBFS; fixture: pad 1 in Gate, pad 2 in group 1)
+  Auto chaos                     +1.4     +1.9      0.5      2.9      2.8      4.4  ok
+                               (values: min '0%', mid '50%', max '100%'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto density                   +4.4     +6.9      2.5      6.0     11.0     13.2  ok
+                               (values: min '0%', mid '50%', max '100%'; peak -0.08 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto swing                     -0.1     -0.2     -2.1     -2.8      0.7      0.6  ok
+                               (values: min '0%', mid '50%', max '100%'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto slot                      +1.3     +1.3      2.9      2.9      9.4      9.4  ok
+                               (values: min 'A', mid 'D', max 'D'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto len_a                     -0.9     -0.9      0.2      0.2      4.0      4.0  ok
+                               (values: min '1/2 Bar', mid '4 Bars', max '4 Bars'; peak -0.18 dBFS; fixture: AUTO PLAY on, fixed roll)
+
+  flagged parameters: 0 of 17 rows (pad rows use pad 1 with a pad-focused sequence; pads 1-16 share the code, isolation checked below)
+  [PASS] per-pad isolation: pad N gain -24 dB changes pad N by -24 dB and leaves the next pad bit-identical (all 16 pads)
+  BPM x2 button (sync on): diff 3.6 dB vs detected BPM
+  [PASS] BPM x2 / /2 buttons change the synced playback
+  [PASS] dragging cue markers changes what the pads play
+
+ALL PASSED (0 failures)

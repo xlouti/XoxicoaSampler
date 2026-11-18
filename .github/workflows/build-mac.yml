@@ -1,0 +1,55 @@
+name: Build Xoxicoa Sampler for Mac
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Source/**'
+      - 'CMakeLists.txt'
+      - 'ThirdParty/**'
+      - '.github/workflows/build-mac.yml'
+concurrency:
+  group: build-mac-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  mac-universal:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (universal arm64 + x86_64)
+        run: >-
+          cmake -S . -B build-mac -G Xcode
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+      - name: Build AU, VST3 and Standalone
+        run: cmake --build build-mac --config Release --parallel 3
+      - name: Sign ad-hoc, verify architectures, package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="build-mac/XoxicoaSampler_artefacts/Release"
+          mkdir -p package
+          ditto "$ROOT/AU/Xoxicoa Sampler.component" "package/Xoxicoa Sampler.component"
+          ditto "$ROOT/VST3/Xoxicoa Sampler.vst3" "package/Xoxicoa Sampler.vst3"
+          ditto "$ROOT/Standalone/Xoxicoa Sampler.app" "package/Xoxicoa Sampler.app"
+          for b in "package/Xoxicoa Sampler.component" "package/Xoxicoa Sampler.vst3" "package/Xoxicoa Sampler.app"; do
+            codesign --force --deep --sign - "$b"
+            lipo "$b/Contents/MacOS/Xoxicoa Sampler" -verify_arch arm64 x86_64
+            lipo -info "$b/Contents/MacOS/Xoxicoa Sampler"
+          done
+          cp README.md SPEC.md ThirdParty/VERSIONS.txt package/
+          ditto -c -k --sequesterRsrc --keepParent package XoxicoaSampler_mac_universal.zip
+      - name: Validate AU (informational)
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          ditto "package/Xoxicoa Sampler.component" ~/Library/Audio/Plug-Ins/Components/"Xoxicoa Sampler.component"
+          killall -9 AudioComponentRegistrar || true
+          auval -v aumu XxSm Xoxi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XoxicoaSampler_mac_universal
+          path: XoxicoaSampler_mac_universal.zip
+          retention-days: 30
