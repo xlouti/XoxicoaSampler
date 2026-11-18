@@ -12,6 +12,8 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
+env:
+  MACOSX_DEPLOYMENT_TARGET: "10.15"
 jobs:
   mac-universal:
     runs-on: macos-15-intel
@@ -22,7 +24,6 @@ jobs:
         run: >-
           cmake -S . -B build-mac -G Xcode
           -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
       - name: Build AU, VST3 and Standalone
         run: cmake --build build-mac --config Release --parallel 3
       - name: Sign ad-hoc, verify architectures, package
@@ -36,13 +37,48 @@ jobs:
           ditto "$ROOT/Standalone/Xoxicoa Sampler.app" "package/Xoxicoa Sampler.app"
           for b in "package/Xoxicoa Sampler.component" "package/Xoxicoa Sampler.vst3" "package/Xoxicoa Sampler.app"; do
             codesign --force --deep --sign - "$b"
-            lipo "$b/Contents/MacOS/Xoxicoa Sampler" -verify_arch arm64 x86_64
-            lipo -info "$b/Contents/MacOS/Xoxicoa Sampler"
+            bin="$b/Contents/MacOS/Xoxicoa Sampler"
+            lipo "$bin" -verify_arch arm64 x86_64
+            lipo -info "$bin"
+            echo "==== vtool $bin ===="
+            vtool -show-build "$bin"
+            for arch in x86_64 arm64; do
+              echo "==== otool LC_BUILD_VERSION $arch ($b) ===="
+              otool -l -arch "$arch" "$bin" | awk '/LC_BUILD_VERSION/{p=1} p&&/minos/{print; exit}'
+            done
+            x64_minos=$(otool -l -arch x86_64 "$bin" | awk '/LC_BUILD_VERSION/{p=1} p&&/minos/{print $2; exit}')
+            echo "x86_64 minos=$x64_minos"
+            if [ "$x64_minos" != "10.15" ]; then
+              echo "ERROR: x86_64 minos is '$x64_minos', expected 10.15"
+              exit 1
+            fi
+            plist_min=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$b/Contents/Info.plist")
+            echo "LSMinimumSystemVersion=$plist_min"
+            if [ "$plist_min" != "10.15" ]; then
+              echo "ERROR: LSMinimumSystemVersion is '$plist_min', expected 10.15"
+              exit 1
+            fi
+          done
+          for b in "package/Xoxicoa Sampler.component" "package/Xoxicoa Sampler.vst3"; do
+            bin="$b/Contents/MacOS/Xoxicoa Sampler"
+            echo "==== nm -m os_workgroup x86_64: $b ===="
+            nm -m -arch x86_64 "$bin" | grep os_workgroup || true
+            echo "==== dyld_info -imports os_workgroup x86_64: $b ===="
+            dyld_info -imports -arch x86_64 "$bin" | grep os_workgroup || true
+            if ! nm -m -arch x86_64 "$bin" | grep -q '_os_workgroup_join'; then
+              echo "ERROR: _os_workgroup_join missing from x86_64 slice of $b"
+              exit 1
+            fi
+            strong=$(nm -m -arch x86_64 "$bin" | grep os_workgroup | grep -v weak || true)
+            if [ -n "$strong" ]; then
+              echo "ERROR: strong os_workgroup imports in x86_64 slice of $b"
+              echo "$strong"
+              exit 1
+            fi
           done
           cp README.md SPEC.md ThirdParty/VERSIONS.txt package/
           ditto -c -k --sequesterRsrc --keepParent package XoxicoaSampler_mac_universal.zip
-      - name: Validate AU (informational)
-        continue-on-error: true
+      - name: Validate AU
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           ditto "package/Xoxicoa Sampler.component" ~/Library/Audio/Plug-Ins/Components/"Xoxicoa Sampler.component"

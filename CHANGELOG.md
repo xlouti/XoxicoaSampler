@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.1 (2026-11-18) - Catalina
+- Minimum macOS is 10.15. The 1.1.0 build required 11.0, so Catalina refused to load it (`_os_workgroup_join` was a strong import).
+
 ## v1.1 (2026-11-17) - AUTO
 - **AUTO** button: analyses the sample's BPM, key, transients (the 16 cues) and phrase energy, then builds a chopped, playable flip
   conformed to the host BPM and to the project key (Key Target). Each press uses a new seed and gives a different flip.
