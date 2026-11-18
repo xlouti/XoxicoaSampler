@@ -62,17 +62,33 @@ jobs:
           for b in "package/Xoxicoa Sampler.component" "package/Xoxicoa Sampler.vst3"; do
             bin="$b/Contents/MacOS/Xoxicoa Sampler"
             echo "==== nm -m os_workgroup x86_64: $b ===="
-            nm -m -arch x86_64 "$bin" | grep os_workgroup || true
+            # Capture the full nm listing before filtering. llvm-nm exits with
+            # SIGPIPE when grep -q closes early, and pipefail then looks like a miss.
+            # Only undefined imports count; C++ mangled names also contain "os_workgroup".
+            nm_out=$(nm -m -arch x86_64 "$bin" || true)
+            imports=$(printf '%s\n' "$nm_out" | grep '(undefined)' | grep '_os_workgroup' || true)
+            printf '%s\n' "$imports"
             echo "==== dyld_info -imports os_workgroup x86_64: $b ===="
-            dyld_info -imports -arch x86_64 "$bin" | grep os_workgroup || true
-            if ! nm -m -arch x86_64 "$bin" | grep -q '_os_workgroup_join'; then
+            dyld_out=$(dyld_info -imports -arch x86_64 "$bin" | grep '_os_workgroup' || true)
+            printf '%s\n' "$dyld_out"
+            if ! printf '%s\n' "$imports" | grep -q '_os_workgroup_join'; then
               echo "ERROR: _os_workgroup_join missing from x86_64 slice of $b"
               exit 1
             fi
-            strong=$(nm -m -arch x86_64 "$bin" | grep os_workgroup | grep -v weak || true)
+            strong=$(printf '%s\n' "$imports" | grep -v weak || true)
             if [ -n "$strong" ]; then
               echo "ERROR: strong os_workgroup imports in x86_64 slice of $b"
-              echo "$strong"
+              printf '%s\n' "$strong"
+              exit 1
+            fi
+            if [ -z "$dyld_out" ]; then
+              echo "ERROR: dyld_info shows no os_workgroup imports in $b"
+              exit 1
+            fi
+            dyld_strong=$(printf '%s\n' "$dyld_out" | grep -v 'weak-import' || true)
+            if [ -n "$dyld_strong" ]; then
+              echo "ERROR: dyld_info strong os_workgroup imports in $b"
+              printf '%s\n' "$dyld_strong"
               exit 1
             fi
           done
