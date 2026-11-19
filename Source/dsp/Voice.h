@@ -11,6 +11,7 @@ namespace xsmp
         PadMode mode = PadMode::OneShot;
         float attackMs = 1.0f, releaseMs = 30.0f, filter = 0.0f, gainDb = 0.0f;
         int choke = 0;
+        float rate = 1.0f; // 1 = original, 0.5 = half-time (GENERATE slow chops)
     };
 
     // One playing pad. Two render paths:
@@ -49,7 +50,7 @@ namespace xsmp
             isAutoVoice = autoLenSamples >= 0; autoRemain = autoLenSamples; dir = reverse ? -1 : 1;
             autoSemis = eventSemis; autoRate = eventRate;
             mode = isAutoVoice ? PadMode::Gate : ps.mode;
-            if (isAutoVoice) sliceEnd = d.length();
+            if (isAutoVoice && sliceEnd <= startPos) sliceEnd = d.length();
             startSrc = xsmp::clampI (0, std::max<juce::int64> (0, d.length() - 1), startPos);
             endSrc   = xsmp::clampI (startSrc + 1, d.length(), sliceEnd);
             if (endSrc - startSrc < (juce::int64) (0.01 * d.fileRate)) endSrc = juce::jmin (d.length(), startSrc + (juce::int64) (0.01 * d.fileRate));
@@ -150,7 +151,9 @@ namespace xsmp
                 filterSm += smCoef * (ps.filter - filterSm);
                 gainSm   += smCoef * (gainTarget - gainSm);
                 if ((coefCounter++ & 15) == 0) updateFilter();
-                const float g = env * gainSm * velGain;
+                const float click = juce::jmin (1.0f, (float) outSamp / juce::jmax (1.0f, 0.0025f * (float) sr));
+                ++outSamp;
+                const float g = env * gainSm * velGain * click;
                 for (int c = 0; c < 2; ++c)
                 {
                     float v = o[c][i];
@@ -262,6 +265,7 @@ namespace xsmp
         float env = 0.0f, releaseDec = 0.001f, velGain = 1.0f, curReleaseMs = 30.0f;
         float filterSm = 0.0f, gainSm = 1.0f, filterMix = 0.0f, g1 = 0, a1 = 0, a2 = 0, a3 = 0, kRes = 1.0f;
         bool isHP = false; int coefCounter = 0;
+        int outSamp = 0;
         bool isAutoVoice = false; juce::int64 autoRemain = -1; int dir = 1; bool varispeed = false; int autoSemis = 0; double autoRate = 1.0;
         float ic1[2] {}, ic2[2] {};
     };

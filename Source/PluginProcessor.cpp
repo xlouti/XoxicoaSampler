@@ -1,6 +1,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+static juce::uint32 freshSeed (juce::uint32 counter);
+
 using namespace xsmp;
 
 XoxicoaSamplerProcessor::XoxicoaSamplerProcessor()
@@ -10,8 +12,29 @@ XoxicoaSamplerProcessor::XoxicoaSamplerProcessor()
     pMaster    = apvts.getRawParameterValue ("master");
     pKeyShift  = apvts.getRawParameterValue ("key_shift");
     pKeyTarget = apvts.getRawParameterValue ("key_target");
+    pSampleKey = apvts.getRawParameterValue ("sample_key");
     pSync      = apvts.getRawParameterValue ("sync");
     pRoot      = apvts.getRawParameterValue ("pad_root");
+    pChopCount = apvts.getRawParameterValue ("chop_count");
+    pChopThresh= apvts.getRawParameterValue ("chop_thresh");
+    pRevSize   = apvts.getRawParameterValue ("vfx_rev_size");
+    pRevMix    = apvts.getRawParameterValue ("vfx_rev_mix");
+    pDlyDiv    = apvts.getRawParameterValue ("vfx_dly_div");
+    pDlyFb     = apvts.getRawParameterValue ("vfx_dly_fb");
+    pDlyMix    = apvts.getRawParameterValue ("vfx_dly_mix");
+    pDlyPP     = apvts.getRawParameterValue ("vfx_dly_pp");
+    pVfxPitch  = apvts.getRawParameterValue ("vfx_pitch");
+    pVfxFormant= apvts.getRawParameterValue ("vfx_formant");
+    pDrive     = apvts.getRawParameterValue ("vfx_drive");
+    pVfxFilter = apvts.getRawParameterValue ("vfx_filter");
+    pStutter   = apvts.getRawParameterValue ("vfx_stutter");
+    pChorus    = apvts.getRawParameterValue ("vfx_chorus");
+    pWidth     = apvts.getRawParameterValue ("vfx_width");
+    pGhostAmt  = apvts.getRawParameterValue ("ghost_amount");
+    pGhostSwell= apvts.getRawParameterValue ("ghost_swell");
+    pGhostSlide= apvts.getRawParameterValue ("ghost_slide");
+    pGhostTone = apvts.getRawParameterValue ("ghost_tone");
+    pGhostMix  = apvts.getRawParameterValue ("ghost_mix");
     pAutoSlot  = apvts.getRawParameterValue ("auto_slot");
     pAutoPlay  = apvts.getRawParameterValue ("auto_play");
     pChaos     = apvts.getRawParameterValue ("auto_chaos");
@@ -31,6 +54,8 @@ XoxicoaSamplerProcessor::XoxicoaSamplerProcessor()
         pp.gain    = apvts.getRawParameterValue (padId (p, "gain"));
         pp.choke   = apvts.getRawParameterValue (padId (p, "choke"));
         cues[(size_t) p] = 0;
+        sliceEnds[(size_t) p] = 0;
+        padRate[(size_t) p] = 1.0f;
         padPlaying[(size_t) p] = false;
         padPos[(size_t) p] = 0.0;
     }
@@ -56,6 +81,7 @@ void XoxicoaSamplerProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     for (auto& v : voices) v.prepare (sr, maxBlock);
     masterGain.reset (sr, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pMaster->load(), -36.0f));
+    vocalFx.prepare (sr, maxBlock);
     keyboardState.reset();
     autoRunning = autoArmed = autoMidiHeld = false;
     autoInternalPpq = 0.0;
@@ -99,9 +125,15 @@ void XoxicoaSamplerProcessor::noteOn (int pad, float vel, const SampleData& d, d
                 v.choke();
 
     const juce::int64 start = cues[(size_t) pad].load();
-    juce::int64 end = d.length();
-    for (auto& c : cues) { const auto q = c.load(); if (q > start && q < end) end = q; }
-    allocVoice (voices)->start (d, pad, start, end, ps, vel, semis, tempoRatio, ++voiceCounter);
+    juce::int64 end = sliceEnds[(size_t) pad].load();
+    if (end <= start)
+    {
+        end = d.length();
+        for (auto& c : cues) { const auto q = c.load(); if (q > start && q < end) end = q; }
+    }
+    if (end - start < (juce::int64) (0.01 * d.fileRate)) return; // empty / silent pad
+    const double rate = (double) padRate[(size_t) pad].load();
+    allocVoice (voices)->start (d, pad, start, end, ps, vel, semis, tempoRatio * (rate > 0.05 ? rate : 1.0), ++voiceCounter);
 }
 
 void XoxicoaSamplerProcessor::noteOff (int pad)
@@ -158,12 +190,16 @@ void XoxicoaSamplerProcessor::triggerAutoEvent (const AutoEvent& e, const Sample
     const double sBpm = getSampleBpm() > 0 ? getSampleBpm() : 120.0;
     const double srcTick = 60.0 / sBpm / kTicksPerBeat * d.fileRate;
     const double lenSamples = e.len * 60.0 / bpm / kTicksPerBeat * sr;
-    juce::int64 start = cues[(size_t) pad].load() + (juce::int64) (off * srcTick);
+    const juce::int64 cue0 = cues[(size_t) pad].load();
+    const juce::int64 cue1 = sliceEnds[(size_t) pad].load() > cue0 ? sliceEnds[(size_t) pad].load() : d.length();
+    juce::int64 start = cue0 + (juce::int64) (off * srcTick);
+    if (start >= cue1) start = cue0; // don't start in the trimmed-off silence
+    start = juce::jlimit (cue0, juce::jmax (cue0, cue1 - 1), start);
     // source distance covered by the event: stretched voices move at autoRatio*rate, pitch accents are varispeed chops
     const double travel = es != 0 ? std::pow (2.0, (baseSemis + es) / 12.0) : autoRatio * rate;
-    if (rev) start += (juce::int64) (lenSamples / sr * d.fileRate * travel);
+    if (rev) start = juce::jmin (cue1, start + (juce::int64) (lenSamples / sr * d.fileRate * travel));
     for (auto& v : voices) if (v.isActive() && v.isAuto() && ! v.isReleasing()) v.choke();   // the Auto line is monophonic
-    allocVoice (voices)->start (d, pad, start, d.length(), settings[(size_t) pad], e.gain, baseSemis + es, autoRatio * rate,
+    allocVoice (voices)->start (d, pad, start, cue1, settings[(size_t) pad], e.gain, baseSemis + es, autoRatio * rate,
                                 ++voiceCounter, rev, (juce::int64) std::round (lenSamples), es, rate);
 }
 
@@ -182,6 +218,8 @@ void XoxicoaSamplerProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     buffer.clear();
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
 
+    // Project BPM is read from the host playhead on EVERY block (never cached in prepareToPlay,
+    // never defaulted to 120 here). 0 means the host did not report a tempo this block.
     double bpm = 0.0, ppq = 0.0, barLenQ = 4.0;
     bool hostPlaying = false;
     if (auto* ph = getPlayHead())
@@ -206,7 +244,8 @@ void XoxicoaSamplerProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         return;
     }
 
-    const int snap = keySnapOffset (d->analysis.keyRoot, d->analysis.minor, (int) pKeyTarget->load());
+    const int snap = keySnapOffset (d->analysis.keyRoot, d->analysis.minor, (int) pKeyTarget->load(),
+                                    pSampleKey != nullptr ? (int) pSampleKey->load() : 0);
     const double semis = juce::jlimit (-24.0, 24.0, (double) pKeyShift->load() + snap);
     const double sBpm = getSampleBpm();
     const double ratio = (pSync->load() > 0.5f && bpm > 0.0 && sBpm > 0.0) ? juce::jlimit (0.5, 2.0, bpm / sBpm) : 1.0;
@@ -364,6 +403,12 @@ void XoxicoaSamplerProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     else autoPosNow = -1.0;
     autoRunningNow = autoRunning; autoArmedNow = autoArmed;
 
+    // Vocal FX + Ghost Voice run on the summed stereo mix, before volume and the safety clip.
+    {
+        float* L = target.getWritePointer (0);
+        float* R = target.getNumChannels() > 1 ? target.getWritePointer (1) : L;
+        vocalFx.process (L, R, n, readVocalFx (autoBpm, hostPlaying ? ppq : autoInternalPpq, hostPlaying || autoRunning));
+    }
     masterGain.setTargetValue (juce::Decibels::decibelsToGain (pMaster->load(), -36.0f));
     if (monoOut)
     {
@@ -465,8 +510,12 @@ void XoxicoaSamplerProcessor::handleAsyncUpdate()
     ++changeCounter;
 }
 
-void XoxicoaSamplerProcessor::install (std::shared_ptr<SampleData> d, std::vector<juce::int64> restoreCues)
+void XoxicoaSamplerProcessor::install (std::shared_ptr<SampleData> d, std::vector<juce::int64> restoreCues,
+                                       std::vector<juce::int64> restoreEnds, std::vector<float> restoreRates)
 {
+    if (restoreEnds.empty()) restoreEnds.swap (pendingRestoreEnds);
+    if (restoreRates.empty()) restoreRates.swap (pendingRestoreRates);
+    pendingRestoreEnds.clear(); pendingRestoreRates.clear();
     std::shared_ptr<SampleData> old;
     {
         const juce::SpinLock::ScopedLockType l (audioSwapLock);
@@ -474,12 +523,23 @@ void XoxicoaSamplerProcessor::install (std::shared_ptr<SampleData> d, std::vecto
         audioSample = d;
         ++sampleGeneration;
         detectedCues = d->analysis.cues;
+        detectedEnds = d->analysis.cueEnds;
+        detectedRates.assign (kNumPads, 1.0f);
         const bool restore = (int) restoreCues.size() == kNumPads;
         for (int i = 0; i < kNumPads; ++i)
-            cues[(size_t) i] = xsmp::clampI (0, std::max<juce::int64> (0, d->length() - 1),
-                                                          restore ? restoreCues[(size_t) i] : (i < (int) detectedCues.size() ? detectedCues[(size_t) i] : 0));
+        {
+            const juce::int64 st = xsmp::clampI (0, std::max<juce::int64> (0, d->length() - 1),
+                                                 restore ? restoreCues[(size_t) i]
+                                                         : (i < (int) detectedCues.size() ? detectedCues[(size_t) i] : 0));
+            cues[(size_t) i] = st;
+            juce::int64 en = d->length();
+            if (restore && (int) restoreEnds.size() == kNumPads) en = restoreEnds[(size_t) i];
+            else if (i < (int) detectedEnds.size()) en = detectedEnds[(size_t) i];
+            sliceEnds[(size_t) i] = xsmp::clampI (st, d->length(), en);
+            padRate[(size_t) i] = (restore && (int) restoreRates.size() == kNumPads) ? restoreRates[(size_t) i] : 1.0f;
+        }
         detectedBpm = d->analysis.bpm;
-        if (! restore) bpmOverride = 0.0;
+        if (! restore) { bpmOverride = 0.0; lastChopWasGenerate = false; lastChopSeed = 0; }
     }
     { const juce::ScopedLock sl (dataLock); sample = d; }
     pendingRestorePath = {};
@@ -495,13 +555,130 @@ void XoxicoaSamplerProcessor::setCue (int i, juce::int64 pos)
     auto s = getSample();
     if (s == nullptr) return;
     cues[(size_t) i] = xsmp::clampI (0, std::max<juce::int64> (0, s->length() - 1), pos);
+    refreshSliceEnds (false);
+    regenerateAuto();
     ++changeCounter;
 }
 
 void XoxicoaSamplerProcessor::resetCuesToDetected()
 {
-    for (int i = 0; i < kNumPads && i < (int) detectedCues.size(); ++i) cues[(size_t) i] = detectedCues[(size_t) i];
+    for (int i = 0; i < kNumPads && i < (int) detectedCues.size(); ++i)
+    {
+        cues[(size_t) i] = detectedCues[(size_t) i];
+        sliceEnds[(size_t) i] = i < (int) detectedEnds.size() ? detectedEnds[(size_t) i] : (i + 1 < (int) detectedCues.size() ? detectedCues[(size_t) (i + 1)] : 0);
+        padRate[(size_t) i] = 1.0f;
+    }
+    lastChopWasGenerate = false;
+    refreshSliceEnds (true);
+    regenerateAuto();
     ++changeCounter;
+}
+
+int XoxicoaSamplerProcessor::getChopCount() const
+{
+    return juce::jlimit (1, kNumPads, pChopCount != nullptr ? (int) pChopCount->load() : 16);
+}
+
+void XoxicoaSamplerProcessor::applyChopSet (const std::vector<ChopSlice>& set, bool asDetected)
+{
+    auto s = getSample();
+    if (s == nullptr) return;
+    const auto n = s->length();
+    for (int i = 0; i < kNumPads; ++i)
+    {
+        if (i < (int) set.size())
+        {
+            cues[(size_t) i] = xsmp::clampI (0, std::max<juce::int64> (0, n - 1), set[(size_t) i].start);
+            sliceEnds[(size_t) i] = xsmp::clampI (cues[(size_t) i].load(), n, set[(size_t) i].end);
+            padRate[(size_t) i] = set[(size_t) i].rate > 0.05f ? set[(size_t) i].rate : 1.0f;
+        }
+        else
+        {
+            cues[(size_t) i] = 0;
+            sliceEnds[(size_t) i] = 0;
+            padRate[(size_t) i] = 1.0f;
+        }
+    }
+    if (asDetected)
+    {
+        detectedCues.clear(); detectedEnds.clear(); detectedRates.clear();
+        for (int i = 0; i < kNumPads; ++i)
+        {
+            detectedCues.push_back (cues[(size_t) i].load());
+            detectedEnds.push_back (sliceEnds[(size_t) i].load());
+            detectedRates.push_back (padRate[(size_t) i].load());
+        }
+    }
+    regenerateAuto();
+    ++changeCounter;
+}
+
+void XoxicoaSamplerProcessor::generateChops()
+{
+    auto s = getSample();
+    if (s == nullptr) return;
+    lastChopSeed = freshSeed (++autoRollCounter);
+    lastChopWasGenerate = true;
+    ChopBuildOpts o;
+    o.count = getChopCount();
+    o.threshold = pChopThresh != nullptr ? pChopThresh->load() : 0.10f;
+    o.seed = lastChopSeed;
+    o.gridBpm = getHostBpm() > 0.0 ? getHostBpm() : getSampleBpm();
+    o.varyLengths = true;
+    o.tightGrid = true;
+    applyChopSet (buildChops (s->audio, s->fileRate, s->analysis, o), false);
+}
+
+void XoxicoaSamplerProcessor::applyChopThreshold()
+{
+    auto s = getSample();
+    if (s == nullptr) return;
+    ChopBuildOpts o;
+    o.count = lastChopWasGenerate ? getChopCount() : kNumPads;
+    o.threshold = pChopThresh != nullptr ? pChopThresh->load() : 0.10f;
+    o.seed = lastChopWasGenerate ? lastChopSeed : 0;
+    o.gridBpm = lastChopWasGenerate && getHostBpm() > 0.0 ? getHostBpm() : getSampleBpm();
+    o.varyLengths = lastChopWasGenerate;
+    o.tightGrid = lastChopWasGenerate;
+    applyChopSet (buildChops (s->audio, s->fileRate, s->analysis, o), ! lastChopWasGenerate);
+}
+
+void XoxicoaSamplerProcessor::refreshSliceEnds (bool trim)
+{
+    auto s = getSample();
+    if (s == nullptr) return;
+    const auto n = s->length();
+    const float gate = chops::threshAbs (s->analysis.peakRms, pChopThresh != nullptr ? pChopThresh->load() : 0.10f);
+    std::array<juce::int64, kNumPads> starts {};
+    for (int i = 0; i < kNumPads; ++i) starts[(size_t) i] = cues[(size_t) i].load();
+    for (int i = 0; i < kNumPads; ++i)
+    {
+        auto a = starts[(size_t) i];
+        auto b = n;
+        for (int j = 0; j < kNumPads; ++j)
+            if (starts[(size_t) j] > a && starts[(size_t) j] < b) b = starts[(size_t) j];
+        if (trim)
+        {
+            chops::trimSilence (s->audio, a, b, gate, s->fileRate, 40.0f);
+            a = chops::snapZero (s->audio, a, s->fileRate, 3.0);
+            cues[(size_t) i] = a;
+        }
+        sliceEnds[(size_t) i] = juce::jmax (a, b);
+    }
+}
+
+VocalFxParams XoxicoaSamplerProcessor::readVocalFx (double bpm, double ppq, bool playing) const
+{
+    VocalFxParams p;
+    p.revSize = pRevSize->load(); p.revMix = pRevMix->load();
+    p.dlyDiv = (int) pDlyDiv->load(); p.dlyFb = pDlyFb->load(); p.dlyMix = pDlyMix->load(); p.dlyPP = pDlyPP->load() > 0.5f;
+    p.pitch = pVfxPitch->load(); p.formant = pVfxFormant->load();
+    p.drive = pDrive->load(); p.filter = pVfxFilter->load();
+    p.stutter = pStutter->load(); p.chorus = pChorus->load(); p.width = pWidth->load();
+    p.ghostAmt = pGhostAmt->load(); p.ghostSwell = pGhostSwell->load();
+    p.ghostSlide = pGhostSlide->load(); p.ghostTone = pGhostTone->load(); p.ghostMix = pGhostMix->load();
+    p.bpm = bpm; p.ppq = ppq; p.playing = playing;
+    return p;
 }
 
 // ---------------------------------------------------------------- state
@@ -510,10 +687,15 @@ void XoxicoaSamplerProcessor::getStateInformation (juce::MemoryBlock& dest)
     auto state = apvts.copyState();
     auto s = getSample();
     state.setProperty ("samplePath", s != nullptr ? s->path : pendingRestorePath, nullptr);
-    juce::StringArray c;
+    juce::StringArray c, e, rt;
     for (auto& q : cues) c.add (juce::String (q.load()));
+    for (auto& q : sliceEnds) e.add (juce::String (q.load()));
+    for (auto& q : padRate) rt.add (juce::String (q.load(), 4));
     state.setProperty ("cues", c.joinIntoString (","), nullptr);
+    state.setProperty ("cueEnds", e.joinIntoString (","), nullptr);
+    state.setProperty ("padRates", rt.joinIntoString (","), nullptr);
     state.setProperty ("bpmOverride", bpmOverride.load(), nullptr);
+    state.setProperty ("editorScale", editorScale.load(), nullptr);
     juce::StringArray sd, st, lk, hist;
     for (int v = 0; v < kNumAutoSlots; ++v) { sd.add (juce::String ((juce::int64) autoSeeds[(size_t) v])); st.add (juce::String (autoStrats[(size_t) v])); lk.add (autoLocked[(size_t) v] ? "1" : "0"); }
     state.setProperty ("autoSeeds", sd.joinIntoString (","), nullptr);
@@ -536,7 +718,10 @@ void XoxicoaSamplerProcessor::setStateInformation (const void* data, int size)
     auto tree = juce::ValueTree::fromXml (*xml);
     const juce::String path = tree.getProperty ("samplePath").toString();
     juce::StringArray c; c.addTokens (tree.getProperty ("cues").toString(), ",", "");
+    juce::StringArray ce; ce.addTokens (tree.getProperty ("cueEnds").toString(), ",", "");
+    juce::StringArray rt; rt.addTokens (tree.getProperty ("padRates").toString(), ",", "");
     const double bo = (double) tree.getProperty ("bpmOverride", 0.0);
+    editorScale = (float) juce::jlimit (0.70, 1.50, (double) tree.getProperty ("editorScale", 1.0));
     apvts.replaceState (tree);
     {
         juce::StringArray sd, st, lk, hist;
@@ -566,14 +751,19 @@ void XoxicoaSamplerProcessor::setStateInformation (const void* data, int size)
         autoHistPos = (int) autoHistory.size() - 1;
         regenerateAuto();
     }
-    std::vector<juce::int64> restore;
-    if (c.size() == kNumPads) for (auto& t : c) restore.push_back (t.getLargeIntValue());
+        std::vector<juce::int64> restore, restoreEnds;
+    std::vector<float> restoreRates;
+    if (c.size() == kNumPads) for (auto& tok : c) restore.push_back (tok.getLargeIntValue());
+    if (ce.size() == kNumPads) for (auto& tok : ce) restoreEnds.push_back (tok.getLargeIntValue());
+    if (rt.size() == kNumPads) for (auto& tok : rt) restoreRates.push_back (tok.getFloatValue());
     if (path.isNotEmpty())
     {
         const juce::File f (path);
         pendingRestorePath = path;
         if (f.existsAsFile())
         {
+            pendingRestoreEnds = restoreEnds;
+            pendingRestoreRates = restoreRates;
             if (juce::MessageManager::getInstanceWithoutCreating() != nullptr
                 && juce::MessageManager::getInstance()->isThisTheMessageThread())
                 loadFileAsync (f, restore);
@@ -597,8 +787,14 @@ void XoxicoaSamplerProcessor::regenerateAuto()
     auto s = getSample();
     AutoContext ctx;
     ctx.data = s.get();
-    for (int i = 0; i < kNumPads; ++i) ctx.cues[(size_t) i] = cues[(size_t) i].load();
+    for (int i = 0; i < kNumPads; ++i)
+    {
+        ctx.cues[(size_t) i] = cues[(size_t) i].load();
+        ctx.cueEnds[(size_t) i] = sliceEnds[(size_t) i].load();
+    }
     ctx.bpm = getSampleBpm();
+    ctx.peakRms = s != nullptr ? s->analysis.peakRms : 0.0f;
+    ctx.threshold = pChopThresh != nullptr ? pChopThresh->load() : 0.10f;
     for (int v = 0; v < kNumAutoSlots; ++v)
         for (int l = 0; l < kNumAutoLens; ++l)
             generateAutoFlip (ctx, autoSeeds[(size_t) v], autoStrats[(size_t) v], autoLenTicks (l), (*autoFlips)[(size_t) v][(size_t) l]);
@@ -752,9 +948,12 @@ bool XoxicoaSamplerProcessor::renderAutoVersion (int slot, int lenIdx, double bp
     r.prepareToPlay (fs, 512);
     r.apvts.replaceState (const_cast<juce::AudioProcessorValueTreeState&> (apvts).copyState());
     r.autoSeeds = autoSeeds; r.autoStrats = autoStrats; r.autoLocked = autoLocked;
-    std::vector<juce::int64> c; for (auto& q : cues) c.push_back (q.load());
+    std::vector<juce::int64> c, e; std::vector<float> rt;
+    for (auto& q : cues) c.push_back (q.load());
+    for (auto& q : sliceEnds) e.push_back (q.load());
+    for (auto& q : padRate) rt.push_back (q.load());
     r.bpmOverride = bpmOverride.load();
-    r.install (std::const_pointer_cast<SampleData> (s), c);
+    r.install (std::const_pointer_cast<SampleData> (s), c, e, rt);
     auto set = [&] (const juce::String& id, float v) { auto* p = r.apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
     set ("auto_slot", (float) slot); set (autoLenId (slot), (float) lenIdx); set ("auto_play", 1.0f);
     const auto total = (int) std::llround (autoLenTicks (lenIdx) / (double) kTicksPerBeat * 60.0 / bpm * fs * cycles);

@@ -4,10 +4,11 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     if(NOT DEFINED CMAKE_OSX_ARCHITECTURES)
         set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Mac architectures")
     endif()
+    # 10.15 so the Intel slice loads on Catalina. The arm64 slice is raised to 11.0 by the linker.
     set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version" FORCE)
 endif()
 
-project(XoxicoaSampler VERSION 1.1.1 LANGUAGES C CXX)
+project(XoxicoaSampler VERSION 1.2.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,7 +28,7 @@ else()
 endif()
 
 juce_add_plugin(XoxicoaSampler
-    VERSION                   1.1.1
+    VERSION                   1.2.2
     COMPANY_NAME              "Xoxicoa"
     PRODUCT_NAME              "Xoxicoa Sampler"
     BUNDLE_ID                 com.xoxicoa.sampler
@@ -65,7 +66,7 @@ target_link_libraries(XoxicoaSampler
         juce::juce_recommended_warning_flags)
 
 if(XSMP_BUILD_TESTS)
-    foreach(tool XoxicoaSamplerTest XoxicoaSamplerUISnapshot)
+    foreach(tool XoxicoaSamplerTest XoxicoaSamplerUISnapshot XoxicoaSamplerDemos)
         juce_add_console_app(${tool} PRODUCT_NAME "${tool}")
         target_include_directories(${tool} PRIVATE Source ThirdParty tests)
         target_compile_definitions(${tool} PRIVATE
@@ -75,4 +76,5 @@ if(XSMP_BUILD_TESTS)
     endforeach()
     target_sources(XoxicoaSamplerTest PRIVATE tests/SamplerTest.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
     target_sources(XoxicoaSamplerUISnapshot PRIVATE tests/UISnapshot.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
+    target_sources(XoxicoaSamplerDemos PRIVATE tests/FixDemos.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
 endif()

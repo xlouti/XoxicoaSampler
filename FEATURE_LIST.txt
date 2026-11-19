@@ -1,0 +1,97 @@
+Xoxicoa Sampler v1.2.2 — intended feature list
+==============================================
+Instrument plugin (AU / VST3 / Standalone). White background, black controls and text.
+Default editor 1240×760 (fits a 13" Air inside 1400×780). Corner-resizable 70–150% at a fixed aspect ratio; scale is saved with the project.
+v1.2.2: every label sits inside its panel with no overlap (HOST SYNC under PAD ROOT NOTE, MODE below the PAD title, pad slice times on their own line).
+macOS 10.15 (Catalina) deployment target (Intel slice; arm64 raises to 11.0 at link).
+Every knob listed here is wired to DSP and was audited to change the sound.
+
+LOADING AND ANALYSIS
+- Drag-and-drop or LOAD. WAV, AIFF, MP3, FLAC, OGG, M4A (M4A on Mac via CoreAudio).
+- Background decode + analysis; files capped at 10 minutes. Audio stays at the file sample rate.
+- SAMPLE BPM: spectral-flux envelope, autocorrelation + harmonic comb, range 70–180. /2 and x2 override, saved with the project.
+- SAMPLE KEY: 55 Hz–2 kHz chromagram vs Krumhansl-Kessler major/minor profiles (24 keys).
+- SAMPLE KEY override (Auto + 24 keys): when set, snap math uses this instead of detection. Saved with the project.
+- Default cues: flux-first onsets, syllable peaks only when they are not within 40 ms of a flux peak,
+  refined to the transient start, zero-crossing snap, leading/trailing silence trimmed against the threshold.
+  Remaining slots are filled from leftover onsets, then a 16th-note grid. Silent/tiny files still get 16 grid cues.
+- Waveform (black on white): drag numbered markers (snap to quietest sample in 2 ms, Shift = no snap),
+  wheel zoom, drag pan, double-click full view. Selected slice shaded; playheads while pads play.
+  Empty/silent pads are hidden. RESET CUES restores the detected set (re-trimmed).
+
+PROJECT TEMPO AND KEY (header)
+- SAMPLE BPM / SAMPLE KEY: analysis of the loaded file (plus any BPM override).
+- PROJECT BPM: host AudioPlayHead tempo, read every processBlock (never cached in prepareToPlay,
+  never taken from the sample). Also read live for GENERATE / AUTO before the first block.
+- PROJECT KEY: the Key Target control (FL Studio does not expose project key). Shows "Set key" when Off.
+- PITCH readout: total shift in semitones, with the snap amount in brackets.
+
+KEY AND TEMPO (all playback: pads + AUTO + GENERATE chops)
+- Key Shift: −12…+12 st, real time, including notes already playing.
+- PROJECT KEY (Key Target): Off, or any of 12 major + 12 minor.
+  Snap is the nearest interval in −6…+5 semitones from the sample's detected key to the target,
+  going via the relative major/minor (so A min → C maj is 0 st by design). Integer semitones, no cents.
+  Applied to every voice (pads and Auto).
+- Host Sync: time-stretch to PROJECT BPM ÷ SAMPLE BPM (clamped ×0.5…×2), pitch unchanged.
+  Auto always conforms to project tempo even when Host Sync is off.
+- Volume: −36…+6 dB.
+- Engine: Signalsmith Stretch (MIT). Direct (non-stretch) path when pitch is 0 and sync is off.
+
+GENERATE CHOPS
+- GENERATE builds a new randomised set of chops each press (1–16, COUNT).
+- Onset/syllable-aware, snapped to the project BPM grid, zero-crossing + short start fades (no clicks).
+- Lengths vary, including slow/long chops and half-time / time-stretch rates synced to project BPM.
+- Mapped to pads 1…N; leftover pads stay empty.
+- THRESHOLD (0–100%, default 10%): RMS/vocal-band silence gate and trim. Raising it drops quieter slices
+  and shortens leading/trailing silence. Applied to default cues, GENERATE, and AUTO pad picking.
+
+PLAYING (16 PADS)
+- 4×4 pads. MIDI = Pad Root (default 36 / C1) + pad − 1. Computer keys 1-4 / Q-R / A-F / Z-V.
+  Click a pad to play; higher on the pad is louder.
+- 12 voices, monophonic per pad (6 ms retrigger choke). Velocity = level.
+- Per pad: Mode (One-Shot / Gate / Loop), Attack 0.5–500 ms, Release 3 ms–2 s,
+  bipolar DJ Filter (LP ← open → HP), Gain −24…+6 dB, Choke Group Off/1–4.
+- 2.5 ms start fade on every voice to kill clicks.
+
+AUTO FLIP
+- AUTO rolls six versions A–F (REORDER, HALF-TIME, STUTTER, OCTAVES, GAPS, CHOP) at project BPM + PROJECT KEY.
+- Only non-silent slices (after THRESHOLD) are eligible. If everything is below the gate, the loudest pad is
+  used as a last resort so a tone/file that is "all signal" still flips; a truly silent file yields no events.
+- Per-version length 1/2–16 bars, ROLL, LOCK. UNDO / HISTORY (24). CHAOS, DENSITY, SWING.
+- AUTO PLAY starts on the next host bar. MIDI C0 holds the version; C#0–F#0 select A–F when pad root is above F#0.
+- Events are pad + offset on a 1/32 grid, so moving a cue re-chops every version. Offsets are snapped out of trimmed silence.
+- DRAG MIDI / DRAG WAV export the active version.
+
+VOCAL FX (post-voice bus; every knob audible)
+- Reverb: Size, Mix (juce::Reverb).
+- Delay: tempo-synced 1/32 … 1/2 including triplets and dotted (default 1/8D), Feedback, Mix, Ping-Pong.
+- Pitch: −12…+12 st (4-grain ~40 ms shifter).
+- Formant: −12…+12 st (stereo EQ/shift, independent of pitch).
+- Drive: saturation.
+- Filter: bipolar DJ HP/LP + cutoff.
+- Stutter/gate: host-synced 1/8, 1/16, 1/32 depending on amount.
+- Chorus, Width (0 = mono, 50% = natural, 100% = wide).
+- Idle early-out when all mixes/offsets are at their off/neutral positions.
+
+GHOST VOICE (wet-only background pad, snapped to PROJECT KEY)
+- Amount: layer density (unison + octave + fifth).
+- Swell: BPM-synced fade in/out.
+- Slide: pitch slide up from below on the swell.
+- Tone: low-pass brightness.
+- Mix: wet level into the output.
+- Built as a long diffuse reverb on a pitch-shifted unison layer.
+
+OUTPUT
+- Stereo (mono supported). NaN guard. Soft clip above −0.9 dBFS, never exceeds 0 dBFS.
+- Audio thread does not allocate. Project saves parameters, sample path, cues, slice ends, pad rates, BPM override.
+  Audio is not embedded.
+
+HONEST LIMITS
+- SAMPLE BPM / SAMPLE KEY can still be wrong on sparse, ambient, or dense real mixes (e.g. the Mazzy Star
+  "Into Dust" vocal is labelled 86 BPM D maj; analysis can land elsewhere). Correct SAMPLE BPM with /2, x2
+  or the override; set PROJECT KEY by ear. There is no sample-key override yet.
+- FL Studio does not expose project key; PROJECT KEY is always the manual selector (optionally informed by detection).
+- Snap is integer semitones only, relative major/minor, wrap −6…+5. A min and C maj are treated as the same centre.
+- Stretching beyond about ±7 st or ×1.5 smears transients. Use 256+ sample buffers in the host.
+- No warp markers; sample tempo is constant.
+- Linux-tested offline. A Mac/Catalina + FL Studio host pass is still required after the macOS CI build.

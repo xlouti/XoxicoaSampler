@@ -23,8 +23,14 @@ namespace xsmp
         int keyRoot = -1;           // 0..11, -1 = unknown
         bool minor = false;
         float keyConfidence = 0.0f; // Pearson r of the winning profile
-        std::vector<juce::int64> cues; // 16 positions in source samples (sorted)
+        std::vector<juce::int64> cues; // pad starts, time-sorted, length numCues
+        std::vector<juce::int64> cueEnds; // trimmed slice ends (same length as cues)
+        std::vector<float> cueRms;
         std::vector<juce::int64> onsets; // every detected onset (for display/tests)
+        float peakRms = 0.0f;
+        // Filled by detectCues (Chops.h): non-silent onset slices used by GENERATE / AUTO.
+        struct Eligible { juce::int64 start = 0, end = 0; float rms = 0.0f, vocalRms = 0.0f; };
+        std::vector<Eligible> eligible;
     };
 
     namespace analysis
@@ -287,6 +293,8 @@ namespace xsmp
         }
     }
 
+#include "Chops.h"
+
     inline AnalysisResult analyse (const juce::AudioBuffer<float>& audio, double fs, int numCues = 16)
     {
         AnalysisResult r;
@@ -296,19 +304,32 @@ namespace xsmp
         auto env = analysis::onsetEnvelope (x, fs, hop);
         r.bpm = analysis::detectBpm (env, fs / hop);
         analysis::detectKey (x, fs, r);
-        analysis::detectCues (x, env, hop, fs, r, numCues);
+        detectCues (audio, x, env, hop, fs, r, numCues);
         return r;
     }
 
-    // Key-target snap: semitone offset (-6..+5) that moves the detected key onto the target.
-    // Mode differences are handled through the relative major (A min == C maj).
-    inline int keySnapOffset (int detRoot, bool detMinor, int targetChoice)
+    // Resolve the sample key used for snap: sampleKeyChoice 0 = Auto (use detection), else 24 keys
+    // in the same order as keyTargetChoices after Off (1 = C maj ... 24 = B min).
+    inline void resolvedSampleKey (int detRoot, bool detMinor, int sampleKeyChoice, int& root, bool& minor)
     {
-        if (targetChoice <= 0 || detRoot < 0) return 0;
+        if (sampleKeyChoice <= 0) { root = detRoot; minor = detMinor; return; }
+        const int i = sampleKeyChoice - 1;
+        minor = i >= 12;
+        root  = i % 12;
+    }
+
+    // Key-target snap: semitone offset (-6..+5) that moves the sample key onto the target.
+    // Mode differences are handled through the relative major (A min == C maj).
+    // sampleKeyChoice 0 (default) uses the detected key; a non-zero override replaces detection.
+    inline int keySnapOffset (int detRoot, bool detMinor, int targetChoice, int sampleKeyChoice = 0)
+    {
+        int root = detRoot; bool minor = detMinor;
+        resolvedSampleKey (detRoot, detMinor, sampleKeyChoice, root, minor);
+        if (targetChoice <= 0 || root < 0) return 0;
         const int tIdx = targetChoice - 1;
         const bool tMinor = tIdx >= 12;
         const int tRoot = tIdx % 12;
-        const int detRel = detMinor ? (detRoot + 3) % 12 : detRoot;
+        const int detRel = minor ? (root + 3) % 12 : root;
         const int tRel   = tMinor   ? (tRoot + 3) % 12   : tRoot;
         int d = ((tRel - detRel) % 12 + 12) % 12;
         if (d > 5) d -= 12;

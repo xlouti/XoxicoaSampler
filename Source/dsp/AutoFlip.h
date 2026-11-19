@@ -52,7 +52,9 @@ namespace xsmp
     {
         const SampleData* data = nullptr;
         std::array<juce::int64, 16> cues {};
+        std::array<juce::int64, 16> cueEnds {};
         double bpm = 120.0;
+        float peakRms = 0.0f, threshold = 0.10f;
     };
 
     namespace autogen
@@ -112,7 +114,8 @@ namespace xsmp
         const double srcTick = 60.0 / bpm / kTicksPerBeat * d.fileRate;
         const auto len = d.length();
 
-        // cues sorted by time + per-chop energy (1 beat after the cue): the "phrase energy" map
+        // cues sorted by time + per-chop energy of the trimmed slice (not a 1-beat window, which
+        // could be silence after a cue that landed in a gap).
         std::array<int, 16> order {};
         for (int i = 0; i < 16; ++i) order[(size_t) i] = i;
         std::sort (order.begin(), order.end(), [&] (int a, int b) { return ctx.cues[(size_t) a] < ctx.cues[(size_t) b]; });
@@ -120,13 +123,35 @@ namespace xsmp
         std::array<float, 16> energy {};
         for (int p = 0; p < 16; ++p)
         {
-            const auto a = ctx.cues[(size_t) p], b = std::min<juce::int64> (len, a + (juce::int64) (srcTick * kTicksPerBeat));
-            double s = 0;
-            for (auto i = a; i < b; i += 4) s += (double) d.audio.getSample (0, (int) i) * d.audio.getSample (0, (int) i);
-            energy[(size_t) p] = (float) std::sqrt (s / std::max<juce::int64> (1, (b - a) / 4));
+            auto a = ctx.cues[(size_t) p];
+            auto b = ctx.cueEnds[(size_t) p] > a ? ctx.cueEnds[(size_t) p]
+                                                 : std::min (len, a + (juce::int64) (srcTick * kTicksPerBeat));
+            b = std::min (len, b);
+            energy[(size_t) p] = (b > a) ? chops::bufferRms (d.audio, a, b, 4) : 0.0f;
         }
-        std::array<int, 16> byEnergy = order;
+        const float gate = chops::threshAbs (ctx.peakRms > 0.0f ? ctx.peakRms : (d.analysis.peakRms), ctx.threshold);
+        std::vector<int> live;
+        int loudest = 0; float loud = -1;
+        for (int p = 0; p < 16; ++p)
+        {
+            const auto a = ctx.cues[(size_t) p];
+            const auto b = ctx.cueEnds[(size_t) p] > a ? ctx.cueEnds[(size_t) p]
+                                                       : std::min (len, a + (juce::int64) (srcTick * kTicksPerBeat));
+            if (energy[(size_t) p] > loud) { loud = energy[(size_t) p]; loudest = p; }
+            if (energy[(size_t) p] >= gate && (b - a) > (juce::int64) (0.015 * d.fileRate))
+                live.push_back (p);
+        }
+        if (live.empty())
+        {
+            if (loud > 1.0e-6f) live.push_back (loudest);
+            else return;
+        }
+        std::array<int, 16> byEnergy {};
+        for (int i = 0; i < 16; ++i) byEnergy[(size_t) i] = i;
         std::sort (byEnergy.begin(), byEnergy.end(), [&] (int a, int b) { return energy[(size_t) a] > energy[(size_t) b]; });
+        // Ranked live pads (loudest first)
+        std::vector<int> byLive = live;
+        std::sort (byLive.begin(), byLive.end(), [&] (int a, int b) { return energy[(size_t) a] > energy[(size_t) b]; });
 
         const double srcTicksAvail = (double) (len - origin) / srcTick;
         const int srcSpan = srcTicksAvail >= kTicksPerBar ? (int) (std::floor (srcTicksAvail / kTicksPerBar) * kTicksPerBar)
@@ -134,15 +159,33 @@ namespace xsmp
         auto padOff = [&] (double srcTickPos, juce::int8& pad, juce::int16& off)
         {
             const double pos = (double) origin + srcTickPos * srcTick;
-            int best = order[0];
-            for (int k = 0; k < 16; ++k) if ((double) ctx.cues[(size_t) order[(size_t) k]] <= pos + 1.0) best = order[(size_t) k];
+            int best = live[0];
+            for (int p : live)
+                if ((double) ctx.cues[(size_t) p] <= pos + 1.0
+                    && (ctx.cueEnds[(size_t) p] <= ctx.cues[(size_t) p] || pos < (double) ctx.cueEnds[(size_t) p] + srcTick))
+                    best = p;
+            // If the mapped position is past the trimmed end (into silence), snap to the start of that pad.
+            if (ctx.cueEnds[(size_t) best] > ctx.cues[(size_t) best] && pos >= (double) ctx.cueEnds[(size_t) best])
+            {
+                // nearest live pad by start
+                int near = live[0]; double bd = 1.0e99;
+                for (int p : live)
+                {
+                    const double dlt = std::abs (pos - (double) ctx.cues[(size_t) p]);
+                    if (dlt < bd) { bd = dlt; near = p; }
+                }
+                best = near;
+                pad = (juce::int8) best;
+                off = 0;
+                return;
+            }
             pad = (juce::int8) best;
             off = (juce::int16) juce::jlimit (0, 30000, (int) std::round ((pos - (double) ctx.cues[(size_t) best]) / srcTick));
         };
         auto pickPad = [&] (bool strong)
         {
-            const int top = strong ? 4 : 12;
-            return byEnergy[(size_t) rng.nextInt (top)];
+            const int top = juce::jmax (1, juce::jmin ((int) byLive.size(), strong ? 4 : (int) byLive.size()));
+            return byLive[(size_t) rng.nextInt (top)];
         };
 
         const Probs pr = probsFor (strategy);
@@ -199,7 +242,7 @@ namespace xsmp
                 padOff (sPos, e.pad, e.off);
                 // re-ordered chop from the motif (downbeats prefer strong chops)
                 int ap = motif[(size_t) (onsetCount % motifLen)];
-                if (o == 0 && rng.nextFloat() < 0.6f) ap = byEnergy[(size_t) rng.nextInt (3)];
+                if (o == 0 && rng.nextFloat() < 0.6f) ap = byLive[(size_t) rng.nextInt (juce::jmax (1, juce::jmin (3, (int) byLive.size())))];
                 e.altPad = (juce::int8) ap;
                 e.altOff = (ap == prevAltPad && prevAltEnd == tick) ? (juce::int16) prevAltOffEnd : 0;
                 prevAltPad = ap; prevAltEnd = tick + e.len; prevAltOffEnd = e.altOff + e.len;

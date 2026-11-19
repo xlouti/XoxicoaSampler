@@ -1,0 +1,108 @@
+Xoxicoa Sampler v1.2.1 — knob audit
+Written 2026-11-18, America/New_York. Linux Release, 48 kHz / 512.
+levelD = RMS change vs the min setting; diff = RMS(render - min render) re the min render.
+FLAG when |level| < 1 dB AND diff < -20 dB (legacy rows also report a band-energy delta).
+
+RESULT: 0 flagged among the pre-v1.2 parameters, 0 flagged among the 17 new v1.2 parameters.
+Every knob audibly changes the sound.
+
+======== existing parameters (XoxicoaSamplerTest; 140 BPM A-min beat, host 160 BPM; pad rows use pad 1; AUTO rows use a fixed roll) ========
+
+=== KNOB AUDIT (min / mid / max, every parameter; sample = 140 BPM A-min beat, host 160 BPM) ===
+Sequence: pads 1-8 over 4 bars at 160 BPM, pad 1 held for 2 beats (longer than its slice), pad 2 overlaps pad 1.
+Fixtures: pad 2 choke = group 1 (so pad 1's choke has a partner). Defaults otherwise (sync off, key 0).
+levelD = RMS change vs min; diff = RMS(render - min render) re min render; band = max octave-band change.
+FLAG (too subtle) when |level| < 1 dB AND diff < -20 dB AND band < 1.5 dB (same rule as Xoxicoa FX).
+
+  param                       lvl mid  lvl max diff mid diff max band mid band max  verdict
+  Volume                         +8.1    +27.8      7.2     27.8     36.0     56.6  ok
+                               (values: min '-36.0 dB', mid '-15.0 dB', max '6.0 dB'; peak 0.00 dBFS)
+  Key Shift                      +0.9     -0.2      3.4      2.9     12.1     31.8  ok
+                               (values: min '-12 st', mid '0 st', max '+12 st'; peak -0.13 dBFS)
+  Key Target (auto snap)         -0.4     -0.4      2.9      3.0      2.7      5.3  ok
+                               (values: min 'Off', mid 'B maj', max 'A maj'; peak -0.08 dBFS)
+  Tempo Sync (auto)              -0.6     -0.6     -0.2     -0.2      1.5      1.5  ok
+                               (values: min 'Off', mid 'On', max 'On'; peak -0.00 dBFS)
+  Pad Root Note                  -0.2     -2.2      3.2      1.5      4.0      4.2  ok
+                               (values: min '36', mid '33', max '40'; peak -0.13 dBFS)
+  Pad mode                       -0.2     +3.1     -3.9      1.6      1.6      6.0  ok
+                               (values: min 'One-Shot', mid 'Gate', max 'Loop'; peak -0.17 dBFS)
+  Pad attack                     -2.7     -8.8     -5.7     -1.4      3.0     15.6  ok
+                               (values: min '0.5 ms', mid '50.1 ms', max '500 ms'; peak -0.17 dBFS)
+  Pad release (one-shot tail)     +0.5     +3.9     -9.0      1.2      2.5      6.6  ok
+                               (values: min '3.0 ms', mid '201 ms', max '2000 ms'; peak -0.04 dBFS)
+  Pad release (gate)             +0.3     +2.2    -11.1     -1.4      0.7      3.9  ok
+                               (values: min '3.0 ms', mid '201 ms', max '2000 ms'; peak -0.52 dBFS; fixture: pad 1 in Gate)
+  Pad filter                     +0.4     -8.6     -1.1     -0.8      1.9     18.0  ok
+                               (values: min 'LP 100%', mid 'Open', max 'HP 100%'; peak -0.17 dBFS)
+  Pad gain                       +2.7    +14.0     -2.5     13.5      8.5     22.9  ok
+                               (values: min '-24.0 dB', mid '-9.0 dB', max '6.0 dB'; peak -0.00 dBFS)
+  Pad choke group                +0.0     -0.8   -240.0     -8.1      0.0      2.5  ok
+                               (values: min 'Off', mid '2', max '1'; peak -1.93 dBFS; fixture: pad 1 in Gate, pad 2 in group 1)
+  Auto chaos                     +1.0     +1.9      0.1      2.7      3.8      6.0  ok
+                               (values: min '0%', mid '50%', max '100%'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto density                   +4.8     +7.6      3.0      6.7     10.9     13.5  ok
+                               (values: min '0%', mid '50%', max '100%'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto swing                     -0.1     -0.3     -2.2     -2.7      1.3      1.6  ok
+                               (values: min '0%', mid '50%', max '100%'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto slot                      +2.1     +2.1      3.6      3.6      8.8      8.8  ok
+                               (values: min 'A', mid 'D', max 'D'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+  Auto len_a                     -1.5     -1.5     -0.7     -0.7      2.1      2.1  ok
+                               (values: min '1/2 Bar', mid '4 Bars', max '4 Bars'; peak -0.00 dBFS; fixture: AUTO PLAY on, fixed roll)
+
+  flagged parameters: 0 of 17 rows (pad rows use pad 1 with a pad-focused sequence; pads 1-16 share the code, isolation checked below)
+  [PASS] per-pad isolation: pad N gain -24 dB changes pad N by -24 dB and leaves the next pad bit-identical (all 16 pads)
+  BPM x2 button (sync on): diff 3.4 dB vs detected BPM
+
+======== new v1.2 parameters (XoxicoaSamplerDemos; 4 bars of GENERATE chops from Mazzy Star "Into Dust" vocals, PROJECT BPM 155, PROJECT KEY B min, HOST SYNC on, sample BPM overridden to 86) ========
+
+Xoxicoa Sampler v1.2 knob audit (new parameters)
+Sequence: 4 bars of generated vocal chops at 155 BPM, PROJECT KEY B min, HOST SYNC on.
+levelD = RMS change vs min; diff = RMS(render - min render) re min render.
+FLAG when |level| < 1 dB AND diff < -20 dB.
+
+  param                         lvl mid  lvl max diff mid diff max  verdict
+  Silence Threshold                +2.0     -0.0     +4.3     +2.9  ok
+                               (values: min 0.02, mid 0.15, max 0.45; peak -0.88 dBFS)
+  Vocal Reverb Size                +0.1     +2.8    -12.5     -0.3  ok
+                               (values: min 0, mid 0.5, max 1; peak -0.52 dBFS)
+  Vocal Reverb Mix                 -0.3     -4.0    -15.1     -7.1  ok
+                               (values: min 0, mid 0.5, max 1; peak -3.11 dBFS)
+  Vocal Delay Mix                  -0.5     -0.8    -13.5     -8.1  ok
+                               (values: min 0, mid 0.4, max 0.8; peak -6.37 dBFS)
+  Vocal Delay Feedback             +0.1     +1.2    -15.5     -4.9  ok
+                               (values: min 0, mid 0.4, max 0.85; peak -5.99 dBFS)
+  Vocal Pitch                      -0.4     -0.1     -6.0     -3.8  ok
+                               (values: min -12, mid 0, max 12; peak -8.02 dBFS)
+  Vocal Formant                    -7.7     -9.1     -0.4     +0.1  ok
+                               (values: min -12, mid 0, max 12; peak -7.84 dBFS)
+  Vocal Drive                      +8.1    +12.7     +5.2    +11.0  ok
+                               (values: min 0, mid 0.5, max 1; peak -0.16 dBFS)
+  Vocal Filter                     +8.5    -14.0    +10.4     +0.1  ok
+                               (values: min -1, mid 0, max 1; peak -9.35 dBFS)
+  Vocal Stutter                    -1.0     -3.2    -17.6     -8.1  ok
+                               (values: min 0, mid 0.5, max 1; peak -0.69 dBFS)
+  Vocal Chorus                     -0.8     -2.3    -13.6     -3.6  ok
+                               (values: min 0, mid 0.5, max 1; peak -3.45 dBFS)
+  Vocal Width                      +1.5     +2.4     -2.3     -2.6  ok
+                               (values: min 0, mid 0.5, max 1; peak -1.73 dBFS)
+  Ghost Amount                     +0.2     -1.6    -12.3     -3.7  ok
+                               (values: min 0, mid 0.5, max 1; peak -1.68 dBFS)
+  Ghost Swell                      +0.6     -0.9     -0.1     -2.2  ok
+                               (values: min 0, mid 0.5, max 1; peak -5.52 dBFS)
+  Ghost Slide                      +1.4     +0.4     -2.3     -3.7  ok
+                               (values: min 0, mid 0.5, max 1; peak -5.10 dBFS)
+  Ghost Tone                       +0.2     -0.2     -2.2     -3.7  ok
+                               (values: min 0, mid 0.5, max 1; peak -5.33 dBFS)
+  Ghost Mix                        -0.5     -0.3     -4.8     -4.9  ok
+                               (values: min 0, mid 0.5, max 1; peak -5.26 dBFS)
+
+flagged parameters: 0 of 17
+ALL NEW KNOBS AUDIBLY CHANGE THE SOUND
+
+======== v1.2.1 SAMPLE KEY override (choice, not a continuous knob) ========
+440 Hz tone detected as A min, PROJECT KEY D maj, host 48 kHz, direct path.
+  Auto (use detection): 494.4 Hz  (want 493.9, +2 st snap)
+  Override = D maj:     440.0 Hz  (want 440.0, 0 st snap)
+  difference vs Auto:   3.0 dB
+  verdict: ok  — the override is used for snap and audibly changes output.

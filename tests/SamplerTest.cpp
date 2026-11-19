@@ -358,6 +358,31 @@ static void pitchTempoTests (const juce::File& toneFile, const juce::File& beatF
     {
         auto out = run (0, false, 120, 120, 1, 2.5);
         check (std::abs (1200.0 * std::log2 (freqOf (out, (int) (0.3 * kHost)) / 440.0)) < 2.0, "44.1k file in 48k host: pitch exact (direct path)");
+
+    // SAMPLE KEY override replaces detection in the snap math (and is audible)
+    {
+        check (keySnapOffset (9, true, 1 + 2, 0) == 2, "Auto sample key: A min -> D maj = +2");
+        check (keySnapOffset (9, true, 1 + 2, 1 + 2) == 0, "Override sample key to D maj -> D maj = 0");
+        check (keySnapOffset (9, true, 1 + 12 + 11, 1 + 2) == 0, "Override D maj -> B min = 0 (relative major)");
+        check (keySnapOffset (9, true, 1 + 12 + 0, 1 + 2) == 1, "Override D maj -> C min = +1");
+        auto runPad = [&] (int sampleKey, int target) {
+            Rig rig (toneFile, 120);
+            for (int i = 0; i < kNumPads; ++i) rig.proc.setCue (i, (juce::int64) (i * 1.0 * kFileFs));
+            rig.proc.setBpmOverride (120.0);
+            rig.set ("key_shift", 0.0f); rig.set ("sync", 0.0f);
+            rig.set ("key_target", (float) target);
+            rig.set ("sample_key", (float) sampleKey);
+            return rig.render ((int) (1.2 * kHost), { { 0, 36, 1.0f }, { (int) (1.0 * kHost), 36, 0.0f } });
+        };
+        const auto autoSnap = runPad (0, 1 + 2);          // detected A min -> D maj = +2
+        const auto overSnap = runPad (1 + 2, 1 + 2);      // override D maj -> D maj = 0
+        const double fAuto = freqOf (autoSnap, (int) (0.3 * kHost));
+        const double fOver = freqOf (overSnap, (int) (0.3 * kHost));
+        std::printf ("  sample key Auto (A min->D maj): %.1f Hz; override D maj: %.1f Hz\n", fAuto, fOver);
+        check (std::abs (1200.0 * std::log2 (fAuto / 493.88)) < 15.0, "SAMPLE KEY Auto keeps detected snap (+2 st)");
+        check (std::abs (1200.0 * std::log2 (fOver / 440.0)) < 15.0, "SAMPLE KEY override is used for snap (0 st)");
+        check (diffDb (overSnap, autoSnap) > -12.0, "SAMPLE KEY override audibly changes output (" + juce::String (diffDb (overSnap, autoSnap), 1) + " dB)");
+    }
     }
     // zero-latency pad start (stretch path): first audible sample within 3 ms of the note
     {
@@ -781,6 +806,7 @@ static void autoTests (const juce::File& toneFile, const juce::File& beatFile)
     {
         Rig rig (toneFile, 120);
         rig.proc.setBpmOverride (120.0);
+        rig.proc.autoRestore (fixedAuto (7)); // slot A = REORDER, deterministic
         rig.set ("auto_chaos", 0.0f); rig.set ("auto_density", 1.0f);
         const auto& an = rig.proc.getSample()->analysis;
         const int target = 1 + 2; // D maj
@@ -788,10 +814,28 @@ static void autoTests (const juce::File& toneFile, const juce::File& beatFile)
         rig.set ("key_target", (float) target);
         juce::AudioBuffer<float> b;
         rig.proc.renderAutoVersion (0, 3, 120.0, 1, b, kHost);
-        const double f = freqOf (b, (int) (0.5 * kHost)), want = 440.0 * std::pow (2.0, snap / 12.0);
-        std::printf ("  key target D maj on a tone detected as %s: snap %+d st, Auto output %.1f Hz (want %.1f)\n",
-                     (keyNames()[juce::jmax (0, an.keyRoot)] + (an.minor ? " min" : " maj")).toRawUTF8(), snap, f, want);
-        check (std::abs (1200.0 * std::log2 (f / want)) < 15.0, "Auto version follows the project key (Key Target)");
+        // Median pitch over audible windows. Short Auto chops smear a single FFT frame
+        // (the loudest window can look like ~480 Hz even when the flip is snapped).
+        const int win = (int) (0.25 * kHost);
+        std::vector<double> freqs;
+        double peakR = 0.0;
+        for (int s = 0; s + win < b.getNumSamples(); s += win / 4)
+        {
+            const double e = rms (b, s, s + win);
+            peakR = juce::jmax (peakR, e);
+            if (e > 0.02) freqs.push_back (freqOf (b, s));
+        }
+        std::sort (freqs.begin(), freqs.end());
+        const double f = freqs.empty() ? 0.0 : freqs[freqs.size() / 2];
+        const double want = 440.0 * std::pow (2.0, snap / 12.0);
+        writeWav (b, gDir.getChildFile ("auto_key_target_Dmaj_from_Amin.wav"));
+        const double cents = freqs.empty() ? 999.0 : 1200.0 * std::log2 (f / juce::jmax (1.0, want));
+        std::printf ("  key target D maj on a tone detected as %s: snap %+d st, Auto median %.1f Hz (want %.1f, %+.1f cents, %d windows, peak RMS %.4f)\n",
+                     (keyNames()[juce::jmax (0, an.keyRoot)] + (an.minor ? " min" : " maj")).toRawUTF8(),
+                     snap, f, want, cents, (int) freqs.size(), peakR);
+        check (peakR > 1.0e-4 && ! freqs.empty(), "Auto key-target render has audible output");
+        check (std::abs (cents) < 40.0, "Auto version follows the project key (Key Target)");
+        check (std::abs (cents) < std::abs (1200.0 * std::log2 (f / 440.0)), "Auto key-target is closer to the snapped pitch than to the unsifted tone");
     }
     // clicks / NaN: every version, every length up to 4 bars, Chaos/Density max, swing on, on the tone file
     {

@@ -97,24 +97,43 @@ public:
     void filesDropped (const juce::StringArray&, int, int) override;
 
     void selectPad (int p);
-    static constexpr int kW = 1120, kH = 920;
+    // Design size: fits a 13" Air (~800 px usable height) and stays inside 1400x780.
+    static constexpr int kW = 1240, kH = 760;
 
 private:
     void timerCallback() override;
     void updateReadouts();
     void releaseAllKeys();
+    void paintChrome (juce::Graphics&);
+    void layoutDesign();
+    void applyWindowScale();
+    void hostAllControlsInContent();
+
+    class Content : public juce::Component
+    {
+    public:
+        explicit Content (XoxicoaSamplerEditor& e) : ed (e) {}
+        void paint (juce::Graphics& g) override { ed.paintChrome (g); }
+        void resized() override { ed.layoutDesign(); }
+    private:
+        XoxicoaSamplerEditor& ed;
+    };
 
     XoxicoaSamplerProcessor& proc;
     xsmp::ui::LookAndFeel lnf;
+    Content content { *this };
     xsmp::ui::WaveformView wave;
     xsmp::ui::PadGrid pads;
 
     juce::TextButton loadBtn { "LOAD" }, halfBtn { "/2" }, dblBtn { "x2" }, resetCuesBtn { "RESET CUES" };
+    juce::TextButton generateBtn { "GENERATE" };
+    juce::ComboBox chopCount;
+    xsmp::ui::XfxKnob thresh;
     std::unique_ptr<juce::FileChooser> chooser;
 
     // global
     xsmp::ui::XfxKnob keyShift, volume;
-    juce::ComboBox keyTarget, padRoot;
+    juce::ComboBox keyTarget, padRoot, sampleKey;
     juce::ToggleButton sync { "SYNC" };
     // selected pad
     xsmp::ui::XfxKnob attack, release, filter, gain;
@@ -124,7 +143,7 @@ private:
     using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using BA = juce::AudioProcessorValueTreeState::ButtonAttachment;
     std::unique_ptr<SA> aKeyShift, aVolume, aAttack, aRelease, aFilter, aGain;
-    std::unique_ptr<CA> aKeyTarget, aRoot, aMode, aChoke;
+    std::unique_ptr<CA> aKeyTarget, aRoot, aMode, aChoke, aSampleKey;
     std::unique_ptr<BA> aSync;
 
     // AUTO
@@ -133,13 +152,26 @@ private:
     xsmp::ui::DragOutButton dragMidi { "DRAG MIDI" }, dragWav { "DRAG WAV" };
     xsmp::ui::XfxKnob chaos, density, swing;
     std::array<std::unique_ptr<xsmp::ui::AutoSlotTile>, xsmp::kNumAutoSlots> tiles;
-    std::unique_ptr<SA> aChaos, aDensity, aSwing;
+    std::unique_ptr<SA> aChaos, aDensity, aSwing, aThresh;
+    std::unique_ptr<CA> aChopCount;
     std::unique_ptr<BA> aAutoPlay;
+
+    // VOCAL FX + GHOST VOICE
+    xsmp::ui::XfxKnob revSize, revMix, dlyFb, dlyMix, vfxPitch, vfxFormant, drive, vfxFilter, stutter, chorus, width;
+    xsmp::ui::XfxKnob ghostAmt, ghostSwell, ghostSlide, ghostTone, ghostMix;
+    juce::ComboBox dlyDiv;
+    juce::ToggleButton dlyPP { "PING-PONG" };
+    std::unique_ptr<SA> aRevSize, aRevMix, aDlyFb, aDlyMix, aVfxPitch, aVfxFormant, aDrive, aVfxFilter, aStutter, aChorus, aWidth;
+    std::unique_ptr<SA> aGhostAmt, aGhostSwell, aGhostSlide, aGhostTone, aGhostMix;
+    std::unique_ptr<CA> aDlyDiv;
+    std::unique_ptr<BA> aDlyPP;
+    float lastThreshUi = -1.0f;
+
     int shownHistSize = -1, shownHistPos = -1;
     void refreshHistory();
     juce::File writeAutoWav() const;
 
-    juce::String bpmText, keyText, statusText, fileText, tempoText;
+    juce::String sampleBpmText, sampleKeyText, projectBpmText, projectKeyText, statusText, fileText, tempoText;
     std::array<bool, xsmp::kNumPads> keyDown {};
     juce::uint32 lastChange = 0;
     bool dragOver = false;

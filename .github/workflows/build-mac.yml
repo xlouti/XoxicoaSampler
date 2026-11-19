@@ -2,6 +2,9 @@ name: Build Xoxicoa Sampler for Mac
 on:
   workflow_dispatch:
   push:
+    branches: ['main']
+    # A pushed tag like v1.2.2 builds and publishes a GitHub release (path filters are not applied to tags).
+    tags: ['v*']
     paths:
       - 'Source/**'
       - 'CMakeLists.txt'
@@ -100,8 +103,45 @@ jobs:
           ditto "package/Xoxicoa Sampler.component" ~/Library/Audio/Plug-Ins/Components/"Xoxicoa Sampler.component"
           killall -9 AudioComponentRegistrar || true
           auval -v aumu XxSm Xoxi
+      - name: Package release zip (VST3 + AU only, small download)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf relpkg && mkdir relpkg
+          ditto "package/Xoxicoa Sampler.vst3" "relpkg/Xoxicoa Sampler.vst3"
+          ditto "package/Xoxicoa Sampler.component" "relpkg/Xoxicoa Sampler.component"
+          (cd relpkg && zip -qry ../XoxicoaSampler_mac_vst3_au.zip "Xoxicoa Sampler.vst3" "Xoxicoa Sampler.component")
+          ls -l XoxicoaSampler_mac_vst3_au.zip
+          unzip -l XoxicoaSampler_mac_vst3_au.zip | tail -1
       - uses: actions/upload-artifact@v4
         with:
           name: XoxicoaSampler_mac_universal
-          path: XoxicoaSampler_mac_universal.zip
+          path: |
+            XoxicoaSampler_mac_universal.zip
+            XoxicoaSampler_mac_vst3_au.zip
           retention-days: 30
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: mac-universal
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: XoxicoaSampler_mac_universal
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            "Universal macOS build (arm64 + x86_64) of Xoxicoa Sampler ${TAG}, built by GitHub Actions on macos-15-intel." \
+            "" \
+            "XoxicoaSampler_mac_vst3_au.zip has Xoxicoa Sampler.vst3 and Xoxicoa Sampler.component. XoxicoaSampler_mac_universal.zip also has the Standalone app." \
+            "" \
+            "Minimum macOS 10.15 (x86_64 slice minos 10.15, arm64 11.0). The _os_workgroup imports are weak, so Catalina loads it. auval -v aumu XxSm Xoxi passed in CI. Ad-hoc signed. See CHANGELOG.md." \
+            > notes.md
+          gh release create "$TAG" XoxicoaSampler_mac_vst3_au.zip XoxicoaSampler_mac_universal.zip \
+            --repo "$GITHUB_REPOSITORY" --title "Xoxicoa Sampler $TAG" --notes-file notes.md

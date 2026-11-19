@@ -121,8 +121,8 @@ void WaveformView::paint (juce::Graphics& g)
     const int sel = proc.uiSelectedPad.load();
     {
         const auto c = proc.getCue (sel);
-        juce::int64 e = len;
-        for (int i = 0; i < kNumPads; ++i) { const auto q = proc.getCue (i); if (q > c && q < e) e = q; }
+        juce::int64 e = proc.getSliceEnd (sel);
+        if (e <= c) { e = len; for (int i = 0; i < kNumPads; ++i) { const auto q = proc.getCue (i); if (q > c && q < e) e = q; } }
         const float x0 = juce::jmax (a.getX(), posToX ((double) c, len)), x1 = juce::jmin (a.getRight(), posToX ((double) e, len));
         if (x1 > x0) { g.setColour (Colours::text.withAlpha (0.06f)); g.fillRect (x0, a.getY(), x1 - x0, a.getHeight()); }
     }
@@ -130,6 +130,7 @@ void WaveformView::paint (juce::Graphics& g)
     // cue markers
     for (int i = 0; i < kNumPads; ++i)
     {
+        if (proc.getSliceEnd (i) <= proc.getCue (i)) continue;
         const float x = posToX ((double) proc.getCue (i), len);
         if (x < a.getX() - 12 || x > a.getRight() + 12) continue;
         const bool hot = i == sel || i == hover || i == dragging;
@@ -256,8 +257,8 @@ void PadGrid::paint (juce::Graphics& g)
         const auto fg = playing ? Colours::white : Colours::text;
         const auto fg2 = playing ? Colours::white.withAlpha (0.75f) : Colours::mid;
         g.setColour (fg);
-        g.setFont (uiFont (26.0f, true));
-        g.drawText (juce::String (i + 1), r.reduced (10, 6), juce::Justification::topLeft);
+        g.setFont (uiFont (r.getHeight() > 70.0f ? 24.0f : 18.0f, true));
+        g.drawText (juce::String (i + 1), r.reduced (7, 4), juce::Justification::topLeft);
         g.setFont (uiFont (11.0f, true));
         g.setColour (fg2);
         g.drawText (noteName (root + i), r.reduced (10, 8), juce::Justification::topRight);
@@ -270,10 +271,12 @@ void PadGrid::paint (juce::Graphics& g)
         // mode + cue time
         const int mode = (int) proc.apvts.getRawParameterValue (padId (i, "mode"))->load();
         g.setColour (fg2);
-        g.setFont (uiFont (10.5f));
-        const juce::String modeStr = mode == 0 ? "ONE-SHOT" : mode == 1 ? "GATE" : "LOOP";
+        g.setFont (uiFont (9.0f));
+        const juce::String modeStr = mode == 0 ? "S" : mode == 1 ? "G" : "L";
         const juce::String cueStr = s != nullptr ? timeStr ((double) proc.getCue (i) / s->fileRate) : "--:--";
-        g.drawText (modeStr + "   " + cueStr, r.reduced (10, 8).withTrimmedRight (30), juce::Justification::bottomLeft);
+        // own full-width line between the pad number and the key chip, so the time is never clipped by the chip
+        g.drawFittedText (modeStr + " " + cueStr, juce::Rectangle<float> (r.getX() + 6, chip.getY() - 13, r.getWidth() - 12, 11).toNearestInt(),
+                          juce::Justification::centredLeft, 1, 0.8f);
     }
 }
 void PadGrid::mouseDown (const juce::MouseEvent& e)
@@ -350,7 +353,7 @@ void AutoSlotTile::paint (juce::Graphics& g)
     g.drawRoundedRectangle (r, 5.0f, active ? 2.4f : 1.0f);
 
     // mini pattern: what this version will actually play at the current Chaos / Density
-    auto pr = juce::Rectangle<float> (r.getX() + 6, head.getBottom() + 5, r.getWidth() - 12, r.getHeight() - 26 - 5 - 58);
+    auto pr = juce::Rectangle<float> (r.getX() + 6, head.getBottom() + 4, r.getWidth() - 12, juce::jmax (8.0f, r.getHeight() - 26 - 4 - 50));
     g.setColour (Colours::panelOn);
     g.fillRect (pr);
     const int li = proc.getAutoLenIdx (slot);
@@ -444,9 +447,12 @@ XoxicoaSamplerEditor::XoxicoaSamplerEditor (XoxicoaSamplerProcessor& p)
     aKeyShift = std::make_unique<SA> (s, "key_shift", keyShift);
     aVolume   = std::make_unique<SA> (s, "master", volume);
     keyTarget.addItemList (keyTargetChoices(), 1);
+    sampleKey.addItemList (sampleKeyChoices(), 1);
+    sampleKey.setTooltip ("Override the detected sample key used for PROJECT KEY snap. Auto uses detection.");
     for (int n = 0; n <= 112; ++n) padRoot.addItem (noteName (n) + "  (" + juce::String (n) + ")", n + 1);
-    for (auto* c : { &keyTarget, &padRoot, &padMode, &choke }) { addAndMakeVisible (*c); c->setWantsKeyboardFocus (false); }
+    for (auto* c : { &keyTarget, &padRoot, &padMode, &choke, &sampleKey }) { addAndMakeVisible (*c); c->setWantsKeyboardFocus (false); }
     aKeyTarget = std::make_unique<CA> (s, "key_target", keyTarget);
+    aSampleKey = std::make_unique<CA> (s, "sample_key", sampleKey);
     aRoot      = std::make_unique<CA> (s, "pad_root", padRoot);
     addAndMakeVisible (sync); sync.setWantsKeyboardFocus (false);
     aSync = std::make_unique<BA> (s, "sync", sync);
@@ -482,6 +488,67 @@ XoxicoaSamplerEditor::XoxicoaSamplerEditor (XoxicoaSamplerProcessor& p)
     density.setTooltip ("How many hits play (low = sparse, high = every chop)");
     swing.setTooltip ("Swing on the 1/16 off-beats");
     for (int v = 0; v < kNumAutoSlots; ++v) { tiles[(size_t) v] = std::make_unique<AutoSlotTile> (proc, v); addAndMakeVisible (*tiles[(size_t) v]); }
+
+    // GENERATE CHOPS
+    generateBtn.getProperties().set ("primary", true);
+    generateBtn.setTooltip ("New randomised chops (1-16). Onset/syllable starts, snapped to the project BPM grid, silence rejected. Some chops are long or half-time.");
+    generateBtn.onClick = [this] { proc.generateChops(); refreshHistory(); };
+    addAndMakeVisible (generateBtn); generateBtn.setWantsKeyboardFocus (false);
+    for (int i = 1; i <= 16; ++i) chopCount.addItem (juce::String (i), i);
+    addAndMakeVisible (chopCount); chopCount.setWantsKeyboardFocus (false);
+    aChopCount = std::make_unique<CA> (s, "chop_count", chopCount);
+    addAndMakeVisible (thresh); thresh.setWantsKeyboardFocus (false);
+    thresh.setPopupDisplayEnabled (true, true, this);
+    thresh.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 18);
+    aThresh = std::make_unique<SA> (s, "chop_thresh", thresh);
+    thresh.setTooltip ("Reject silent or near-silent slices. Higher = stricter.");
+    thresh.onDragEnd = [this] { proc.applyChopThreshold(); };
+
+    auto addKnob = [this] (xsmp::ui::XfxKnob& k, const char* id, std::unique_ptr<SA>& att, int boxW = 70)
+    {
+        addAndMakeVisible (k); k.setWantsKeyboardFocus (false);
+        k.setPopupDisplayEnabled (true, true, this);
+        k.setTextBoxStyle (juce::Slider::TextBoxBelow, false, boxW, 18);
+        att = std::make_unique<SA> (proc.apvts, id, k);
+    };
+    addKnob (revSize, "vfx_rev_size", aRevSize);
+    addKnob (revMix, "vfx_rev_mix", aRevMix);
+    dlyDiv.addItemList (xsmp::vfxDelayDivs, 1);
+    addAndMakeVisible (dlyDiv); dlyDiv.setWantsKeyboardFocus (false);
+    aDlyDiv = std::make_unique<CA> (s, "vfx_dly_div", dlyDiv);
+    addKnob (dlyFb, "vfx_dly_fb", aDlyFb);
+    addKnob (dlyMix, "vfx_dly_mix", aDlyMix);
+    addAndMakeVisible (dlyPP); dlyPP.setWantsKeyboardFocus (false);
+    aDlyPP = std::make_unique<BA> (s, "vfx_dly_pp", dlyPP);
+    addKnob (vfxPitch, "vfx_pitch", aVfxPitch);
+    addKnob (vfxFormant, "vfx_formant", aVfxFormant);
+    addKnob (drive, "vfx_drive", aDrive);
+    addKnob (vfxFilter, "vfx_filter", aVfxFilter);
+    addKnob (stutter, "vfx_stutter", aStutter);
+    addKnob (chorus, "vfx_chorus", aChorus);
+    addKnob (width, "vfx_width", aWidth);
+    addKnob (ghostAmt, "ghost_amount", aGhostAmt);
+    addKnob (ghostSwell, "ghost_swell", aGhostSwell);
+    addKnob (ghostSlide, "ghost_slide", aGhostSlide);
+    addKnob (ghostTone, "ghost_tone", aGhostTone);
+    addKnob (ghostMix, "ghost_mix", aGhostMix);
+    revSize.setTooltip ("Reverb size / decay");
+    revMix.setTooltip ("Reverb wet mix");
+    dlyDiv.setTooltip ("Delay time, synced to the project BPM");
+    dlyFb.setTooltip ("Delay feedback");
+    dlyMix.setTooltip ("Delay wet mix");
+    vfxPitch.setTooltip ("Pitch-shifted wet layer, -12 to +12 semitones");
+    vfxFormant.setTooltip ("Formant colour of the pitched layer");
+    drive.setTooltip ("Saturation / distortion");
+    vfxFilter.setTooltip ("Bipolar DJ filter: left = low-pass, right = high-pass");
+    stutter.setTooltip ("Host-synced gate / stutter (1/8, 1/16, 1/32)");
+    chorus.setTooltip ("Chorus amount");
+    width.setTooltip ("Stereo width: 0 = mono, 50% = natural, 100% = wide");
+    ghostAmt.setTooltip ("Octave and fifth layers under the ghost pad");
+    ghostSwell.setTooltip ("BPM-synced fade in / out (1/8 to 2 bars)");
+    ghostSlide.setTooltip ("Pitch glide from below as the ghost swells in");
+    ghostTone.setTooltip ("Ghost brightness");
+    ghostMix.setTooltip ("Ghost voice wet mix");
     dragMidi.makeFile = [this]
     {
         const int slot = (int) proc.apvts.getRawParameterValue ("auto_slot")->load();
@@ -490,8 +557,18 @@ XoxicoaSamplerEditor::XoxicoaSamplerEditor (XoxicoaSamplerProcessor& p)
     dragMidi.onClick = [this] { auto f = dragMidi.makeFile(); if (f.existsAsFile()) f.revealToUser(); };
     dragWav.makeFile = [this] { return writeAutoWav(); };
     dragWav.onClick = [this] { auto f = writeAutoWav(); if (f.existsAsFile()) f.revealToUser(); };
+    addAndMakeVisible (content);
+    hostAllControlsInContent();
+    setResizable (true, true);
+    setResizeLimits ((int) std::round (kW * 0.70), (int) std::round (kH * 0.70),
+                     (int) std::round (kW * 1.50), (int) std::round (kH * 1.50));
+    if (auto* c = getConstrainer())
+        c->setFixedAspectRatio ((double) kW / (double) kH);
+    const float sc = juce::jlimit (0.70f, 1.50f, proc.getEditorScale());
+    setSize ((int) std::round ((float) kW * sc), (int) std::round ((float) kH * sc));
+
     refreshHistory();
-    resized();
+    applyWindowScale();
 
     selectPad (proc.uiSelectedPad.load());
     updateReadouts();
@@ -500,8 +577,29 @@ XoxicoaSamplerEditor::XoxicoaSamplerEditor (XoxicoaSamplerProcessor& p)
 
 XoxicoaSamplerEditor::~XoxicoaSamplerEditor()
 {
+    proc.setEditorScale ((float) getWidth() / (float) kW);
     releaseAllKeys();
     setLookAndFeel (nullptr);
+}
+
+void XoxicoaSamplerEditor::hostAllControlsInContent()
+{
+    // Layout lives at the design size inside `content`; the editor window scales that child
+    // with an AffineTransform so the host can still apply its own setScaleFactor on the editor.
+    const auto kids = getChildren();
+    for (auto* c : kids)
+        if (c != &content)
+            content.addAndMakeVisible (c);
+    content.toBack();
+}
+
+void XoxicoaSamplerEditor::applyWindowScale()
+{
+    const float s = juce::jlimit (0.70f, 1.50f, (float) getWidth() / (float) kW);
+    content.setTransform (juce::AffineTransform::scale (s));
+    content.setBounds (0, 0, kW, kH);
+    layoutDesign(); // always: setBounds is a no-op when the size is already kW x kH
+    proc.setEditorScale (s);
 }
 
 void XoxicoaSamplerEditor::selectPad (int p)
@@ -555,23 +653,26 @@ juce::File XoxicoaSamplerEditor::writeAutoWav() const
 void XoxicoaSamplerEditor::updateReadouts()
 {
     auto s = proc.getSample();
-    if (s == nullptr) { fileText = proc.isLoading() ? "Analysing..." : "No sample loaded"; bpmText = "--"; keyText = "--"; }
+    if (s == nullptr) { fileText = proc.isLoading() ? "Analysing..." : "No sample loaded"; sampleBpmText = "--"; sampleKeyText = "--"; }
     else
     {
         fileText = s->name + "   " + timeStr (s->seconds()) + "   " + juce::String (s->fileRate / 1000.0, 1) + " kHz";
         const double b = proc.getSampleBpm();
-        bpmText = b > 0 ? juce::String (b, std::abs (b - std::round (b)) < 0.01 ? 0 : 1) : "--";
+        sampleBpmText = b > 0 ? juce::String (b, std::abs (b - std::round (b)) < 0.01 ? 0 : 1) : "--";
         const auto& a = s->analysis;
-        keyText = a.keyRoot >= 0 ? keyNames()[a.keyRoot] + (a.minor ? " min" : " maj") : "--";
+        sampleKeyText = a.keyRoot >= 0 ? keyNames()[a.keyRoot] + (a.minor ? " min" : " maj") : "--";
     }
     const double hb = proc.getHostBpm();
+    projectBpmText = hb > 0.0 ? juce::String (hb, std::abs (hb - std::round (hb)) < 0.01 ? 0 : 1) : "--";
+    const int kt = (int) proc.apvts.getRawParameterValue ("key_target")->load();
+    projectKeyText = kt <= 0 ? "Set key" : xsmp::keyTargetChoices()[kt];
     const bool syncOn = proc.apvts.getRawParameterValue ("sync")->load() > 0.5f;
-    tempoText = syncOn ? (hb > 0 ? "HOST " + juce::String (hb, 1) + " BPM  x" + juce::String (proc.getTempoRatio(), 3) : "HOST TEMPO --")
+    tempoText = syncOn ? (hb > 0 ? "SYNC ON  x" + juce::String (proc.getTempoRatio(), 3) : "SYNC ON  (no host BPM yet)")
                        : "SYNC OFF - ORIGINAL TEMPO";
     const double semis = proc.getTotalSemis();
     const int snap = proc.getSnapOffset();
     statusText = "PITCH " + juce::String (semis > 0 ? "+" : "") + juce::String (semis, 0) + " st"
-               + (snap != 0 || proc.apvts.getRawParameterValue ("key_target")->load() > 0.5f ? "  (snap " + juce::String (snap > 0 ? "+" : "") + juce::String (snap) + ")" : juce::String());
+               + (kt > 0 ? "  (snap " + juce::String (snap > 0 ? "+" : "") + juce::String (snap) + ")" : juce::String());
     auto err = proc.getLastError();
     if (err.isNotEmpty()) fileText += "   -   " + err;
 }
@@ -581,10 +682,16 @@ void XoxicoaSamplerEditor::timerCallback()
     updateReadouts();
     wave.repaint();
     pads.repaint();
-    repaint (0, 0, kW, 70);
-    repaint (getWidth() - 400, 500, 400, 60);
+    content.repaint (0, 0, kW, 64);
     refreshHistory();
     for (auto& t : tiles) t->refresh();
+    const float th = proc.apvts.getRawParameterValue ("chop_thresh")->load();
+    if (lastThreshUi < 0.0f) lastThreshUi = th;
+    if (std::abs (th - lastThreshUi) > 0.008f)
+    {
+        lastThreshUi = th;
+        proc.applyChopThreshold();
+    }
     const juce::String apText = proc.isAutoRunning() ? "AUTO PLAY  -  PLAYING" : proc.isAutoArmed() ? "AUTO PLAY  -  NEXT BAR" : "AUTO PLAY";
     if (autoPlayBtn.getButtonText() != apText) autoPlayBtn.setButtonText (apText);
 }
@@ -592,66 +699,87 @@ void XoxicoaSamplerEditor::timerCallback()
 void XoxicoaSamplerEditor::paint (juce::Graphics& g)
 {
     g.fillAll (Colours::bg);
-    // header
+}
+
+void XoxicoaSamplerEditor::paintChrome (juce::Graphics& g)
+{
+    g.fillAll (Colours::bg);
+    // header — SAMPLE vs PROJECT labelled separately; SAMPLE KEY override sits next to the detection
     g.setColour (Colours::text);
-    g.setFont (uiFont (24.0f, true));
-    g.drawText ("XOXICOA", 20, 14, 130, 30, juce::Justification::left);
-    g.setFont (uiFont (24.0f, false));
-    g.drawText ("SAMPLER", 136, 14, 140, 30, juce::Justification::left);
+    g.setFont (uiFont (20.0f, true));
+    g.drawText ("XOXICOA", 12, 6, 110, 22, juce::Justification::left);
+    g.setFont (uiFont (20.0f, false));
+    g.drawText ("SAMPLER", 122, 6, 120, 22, juce::Justification::left);
     g.setColour (Colours::mid);
-    g.setFont (uiFont (11.5f));
-    g.drawText (fileText, 20, 44, 560, 16, juce::Justification::left);
+    g.setFont (uiFont (10.5f));
+    g.drawText (fileText, 12, 28, 360, 13, juce::Justification::left);
+    g.setFont (uiFont (10.0f, true));
+    g.drawText (tempoText, 12, 42, 200, 12, juce::Justification::left);
+    g.drawText (statusText, 210, 42, 200, 12, juce::Justification::left);
 
     auto readout = [&] (int x, const juce::String& label, const juce::String& value, int w)
     {
-        g.setColour (Colours::dim); g.setFont (uiFont (10.0f, true));
-        g.drawText (label, x, 12, w, 12, juce::Justification::left);
-        g.setColour (Colours::text); g.setFont (uiFont (24.0f, true));
-        g.drawText (value, x, 24, w, 30, juce::Justification::left);
+        g.setColour (Colours::dim); g.setFont (uiFont (8.5f, true));
+        g.drawText (label, x, 6, w, 11, juce::Justification::left);
+        g.setColour (Colours::text); g.setFont (uiFont (16.0f, true));
+        g.drawText (value, x, 18, w, 20, juce::Justification::left);
     };
-    readout (600, "BPM", bpmText, 90);
-    readout (770, "KEY", keyText, 110);
-    g.setColour (Colours::mid); g.setFont (uiFont (10.5f, true));
-    g.drawText (tempoText, 880, 18, 230, 14, juce::Justification::right);
-    g.drawText (statusText, 880, 36, 230, 14, juce::Justification::right);
+    readout (430, "SAMPLE BPM", sampleBpmText, 90);
+    readout (600, "SAMPLE KEY", sampleKeyText, 90);
+    readout (900, "PROJECT BPM", projectBpmText, 100);
+    readout (1020, "PROJECT KEY", projectKeyText, 110);
+    g.setColour (Colours::dim); g.setFont (uiFont (8.5f, true));
+    g.drawText ("OVERRIDE", 700, 6, 120, 11, juce::Justification::left);
     g.setColour (Colours::edge);
-    g.drawHorizontalLine (66, 16.0f, (float) getWidth() - 16.0f);
+    g.drawHorizontalLine (56, 10.0f, (float) kW - 10.0f);
 
-    // right column panels
     auto panel = [&] (juce::Rectangle<int> r, const juce::String& title)
     {
         g.setColour (Colours::panel);
-        g.fillRoundedRectangle (r.toFloat(), 6.0f);
+        g.fillRoundedRectangle (r.toFloat(), 5.0f);
         g.setColour (Colours::edge);
-        g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 6.0f, 1.0f);
+        g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 5.0f, 1.0f);
         g.setColour (Colours::text);
-        g.setFont (uiFont (13.0f, true));
-        g.drawText (title, r.getX() + 14, r.getY() + 10, r.getWidth() - 28, 16, juce::Justification::left);
+        g.setFont (uiFont (11.5f, true));
+        g.drawText (title, r.getX() + 10, r.getY() + 5, r.getWidth() - 20, 14, juce::Justification::left);
     };
     const int sel = proc.uiSelectedPad.load();
-    panel ({ 16, 300, 1088, 188 }, "AUTO FLIP");
+    panel ({ 10, 194, 300, 328 }, "PADS");
+    panel ({ 318, 194, 552, 80 }, "GENERATE CHOPS");
+    panel ({ 318, 282, 552, 240 }, "AUTO FLIP");
     {
         const int slot = (int) proc.apvts.getRawParameterValue ("auto_slot")->load();
-        g.setColour (Colours::mid); g.setFont (uiFont (10.5f, true));
-        g.drawText ("ACTIVE  " + autoSlotChoices()[slot] + "  /  " + strategyName (proc.getAutoStrategy (slot)) + "  /  "
-                        + autoLenChoices()[proc.getAutoLenIdx (slot)] + "   -   conformed to host BPM + KEY TARGET",
-                    120, 310, 640, 14, juce::Justification::left);
-        g.setColour (Colours::dim); g.setFont (uiFont (10.0f));
-        g.drawText ("C0 plays the active version   C#0-F#0 select A-F", 30, 464, 220, 13, juce::Justification::left);
+        g.setColour (Colours::mid); g.setFont (uiFont (9.5f, true));
+        g.drawFittedText (juce::String ("ACTIVE  ") + autoSlotChoices()[slot] + "  /  " + strategyName (proc.getAutoStrategy (slot))
+                        + "  /  " + autoLenChoices()[proc.getAutoLenIdx (slot)] + "   -   PROJECT BPM + KEY",
+                    430, 287, 280, 12, juce::Justification::left, 1, 0.75f); // stops before the CHAOS / DENSITY / SWING labels
+        g.setColour (Colours::dim); g.setFont (uiFont (9.0f));
+        g.drawText ("C0 plays the version   C#0-F#0 select A-F", 328, 508, 250, 11, juce::Justification::left);
     }
-    panel ({ 636, 500, 468, 186 }, "KEY + TEMPO");
-    panel ({ 636, 698, 468, 206 }, "PAD " + juce::String (sel + 1) + "   " + noteName ((int) proc.apvts.getRawParameterValue ("pad_root")->load() + sel)
+    panel ({ 878, 194, 352, 156 }, "KEY + TEMPO");
+    panel ({ 878, 358, 352, 164 }, "PAD " + juce::String (sel + 1) + "   " + noteName ((int) proc.apvts.getRawParameterValue ("pad_root")->load() + sel)
                                     + "  /  key " + PadGrid::keyLabel (sel));
-    g.setColour (Colours::mid); g.setFont (uiFont (10.5f, true));
+    panel ({ 10, 530, 820, 214 }, "VOCAL FX");
+    panel ({ 838, 530, 392, 214 }, "GHOST VOICE");
+    g.setColour (Colours::mid); g.setFont (uiFont (9.5f, true));
     auto lbl = [&] (juce::Component& c, const juce::String& t)
-    { g.drawText (t, c.getX(), c.getY() - 15, c.getWidth(), 13, juce::Justification::centred); };
-    lbl (keyShift, "KEY SHIFT"); lbl (volume, "VOLUME"); lbl (keyTarget, "KEY TARGET (SNAP)"); lbl (padRoot, "PAD ROOT NOTE");
-    lbl (attack, "ATTACK"); lbl (release, "RELEASE"); lbl (filter, "FILTER  LP / HP"); lbl (gain, "GAIN");
+    { g.drawText (t, c.getX(), c.getY() - 12, c.getWidth(), 11, juce::Justification::centred); };
+    lbl (keyShift, "KEY SHIFT"); lbl (volume, "VOLUME"); lbl (keyTarget, "PROJECT KEY"); lbl (padRoot, "PAD ROOT NOTE");
+    lbl (attack, "ATTACK"); lbl (release, "RELEASE"); lbl (filter, "FILTER"); lbl (gain, "GAIN");
     lbl (padMode, "MODE"); lbl (sync, "HOST SYNC"); lbl (choke, "CHOKE GROUP");
     lbl (chaos, "CHAOS"); lbl (density, "DENSITY"); lbl (swing, "SWING");
-    g.setColour (Colours::dim); g.setFont (uiFont (10.0f));
-    g.drawText ("Pads: MIDI " + noteName ((int) proc.apvts.getRawParameterValue ("pad_root")->load()) + " and up, or keys 1-4 / Q-R / A-F / Z-V",
-                16, getHeight() - 16, 600, 13, juce::Justification::left);
+    lbl (thresh, "THRESHOLD"); lbl (chopCount, "COUNT");
+    lbl (revSize, "SIZE"); lbl (revMix, "REVERB"); lbl (dlyDiv, "DELAY"); lbl (dlyFb, "FEEDBACK"); lbl (dlyMix, "DLY MIX");
+    lbl (vfxPitch, "PITCH"); lbl (vfxFormant, "FORMANT"); lbl (drive, "DRIVE"); lbl (vfxFilter, "FILTER");
+    lbl (stutter, "STUTTER"); lbl (chorus, "CHORUS"); lbl (width, "WIDTH");
+    lbl (ghostAmt, "AMOUNT"); lbl (ghostSwell, "SWELL"); lbl (ghostSlide, "SLIDE"); lbl (ghostTone, "TONE"); lbl (ghostMix, "MIX");
+    g.setColour (Colours::dim); g.setFont (uiFont (9.5f));
+    g.drawText ("Pads: MIDI " + noteName ((int) proc.apvts.getRawParameterValue ("pad_root")->load()) + " and up, or keys 1-4 / Q-R / A-F / Z-V.    Drag the corner to scale 70-150%.",
+                12, 744, 1000, 12, juce::Justification::left);
+    // visible grip in the design corner (the real ResizableCornerComponent sits on the editor, on top)
+    g.setColour (Colours::text);
+    for (int i = 0; i < 3; ++i)
+        g.drawLine ((float) (kW - 6 - i * 5), (float) kH - 2.0f, (float) kW - 2.0f, (float) (kH - 6 - i * 5), 1.2f);
     if (dragOver)
     {
         g.setColour (Colours::text.withAlpha (0.04f));
@@ -661,38 +789,81 @@ void XoxicoaSamplerEditor::paint (juce::Graphics& g)
 
 void XoxicoaSamplerEditor::resized()
 {
-    loadBtn.setBounds (470, 18, 64, 28);
-    halfBtn.setBounds (690, 24, 32, 22);
-    dblBtn.setBounds (726, 24, 32, 22);
-    wave.setBounds (16, 76, getWidth() - 32, 212);
+    applyWindowScale();
+}
 
-    // AUTO panel (16,300,1088,188)
-    autoBtn.setBounds (30, 334, 100, 50);
-    undoBtn.setBounds (138, 334, 102, 23);
-    historyBox.setBounds (138, 361, 102, 23);
-    autoPlayBtn.setBounds (30, 392, 210, 28);
-    dragMidi.setBounds (30, 428, 102, 24);
-    dragWav.setBounds (138, 428, 102, 24);
-    for (int v = 0; v < kNumAutoSlots; ++v) if (tiles[(size_t) v] != nullptr) tiles[(size_t) v]->setBounds (256 + v * 102, 330, 97, 148);
-    chaos.setBounds (876, 350, 74, 100);
-    density.setBounds (952, 350, 74, 100);
-    swing.setBounds (1028, 350, 74, 100);
+void XoxicoaSamplerEditor::layoutDesign()
+{
+    // All coordinates are in the 1240x760 design space; the window scales this 70-150%.
+    loadBtn.setBounds (250, 8, 56, 22);
+    halfBtn.setBounds (500, 20, 28, 20);
+    dblBtn.setBounds (532, 20, 28, 20);
+    sampleKey.setBounds (700, 20, 180, 24);
+    wave.setBounds (10, 60, kW - 20, 126);
 
-    pads.setBounds (16, 500, 604, 386);
-    resetCuesBtn.setBounds (1004, 506, 92, 22);
-    // KEY + TEMPO panel (636,500,468,186)
-    keyShift.setBounds (652, 546, 100, 120);
-    keyTarget.setBounds (772, 560, 150, 26);
-    padRoot.setBounds (772, 624, 150, 26);
-    sync.setBounds (936, 624, 60, 26);
-    volume.setBounds (996, 546, 100, 120);
-    // PAD panel (636,698,468,206)
-    padMode.setBounds (652, 746, 130, 26);
-    choke.setBounds (652, 812, 130, 26);
-    attack.setBounds (796, 738, 74, 100);
-    release.setBounds (872, 738, 74, 100);
-    filter.setBounds (948, 738, 74, 100);
-    gain.setBounds (1024, 738, 74, 100);
+    // GENERATE (318,194,552,80)
+    generateBtn.setBounds (330, 216, 120, 40);
+    chopCount.setBounds (462, 228, 72, 24);
+    thresh.setBounds (548, 214, 54, 58); // label sits inside the panel (was above it, over the waveform)
+    resetCuesBtn.setBounds (616, 228, 100, 24);
+
+    // AUTO (318,282,552,240): buttons, 3x2 tiles, chaos knobs
+    autoBtn.setBounds (328, 304, 108, 32);
+    undoBtn.setBounds (328, 340, 108, 20);
+    historyBox.setBounds (328, 362, 108, 20);
+    autoPlayBtn.setBounds (328, 386, 108, 36);
+    dragMidi.setBounds (328, 426, 52, 20);
+    dragWav.setBounds (384, 426, 52, 20);
+    const int tileX = 444, tileW = 84, tileH = 98, tileGap = 5;
+    for (int v = 0; v < kNumAutoSlots; ++v)
+        if (tiles[(size_t) v] != nullptr)
+            tiles[(size_t) v]->setBounds (tileX + (v % 3) * (tileW + tileGap),
+                                          304 + (v / 3) * (tileH + tileGap), tileW, tileH);
+    chaos.setBounds   (716, 304, 48, 72);
+    density.setBounds (766, 304, 48, 72);
+    swing.setBounds   (816, 304, 48, 72);
+
+    pads.setBounds (16, 216, 288, 298);
+
+    // KEY + TEMPO (878,194,352,156)
+    // labels are drawn 12 px above each control; every label clears the panel title (199-213) and the control above it
+    keyShift.setBounds (890, 230, 64, 88);
+    volume.setBounds   (1156, 230, 64, 88);
+    keyTarget.setBounds (966, 230, 150, 24);
+    padRoot.setBounds   (966, 272, 150, 24);
+    sync.setBounds      (1006, 316, 70, 22);
+
+    // PAD (878,358,352,164)
+    padMode.setBounds (890, 396, 120, 24);
+    choke.setBounds   (890, 442, 120, 24);
+    attack.setBounds  (1020, 392, 50, 72);
+    release.setBounds (1072, 392, 50, 72);
+    filter.setBounds  (1124, 392, 50, 72);
+    gain.setBounds    (1176, 392, 50, 72);
+
+    // VOCAL FX (10,530,820,214)
+    const int vy1 = 564, vy2 = 660, kx = 20, ks = 66; // row 1 labels clear the VOCAL FX title
+    revSize.setBounds (kx + 0 * ks, vy1, 58, 80);
+    revMix.setBounds  (kx + 1 * ks, vy1, 58, 80);
+    dlyDiv.setBounds  (kx + 2 * ks, vy1 + 22, 72, 24);
+    dlyFb.setBounds   (kx + 3 * ks + 10, vy1, 58, 80);
+    dlyMix.setBounds  (kx + 4 * ks + 10, vy1, 58, 80);
+    dlyPP.setBounds   (kx + 5 * ks + 16, vy1 + 22, 96, 24);
+    vfxPitch.setBounds   (kx + 0 * ks, vy2, 58, 80);
+    vfxFormant.setBounds (kx + 1 * ks, vy2, 58, 80);
+    drive.setBounds      (kx + 2 * ks, vy2, 58, 80);
+    vfxFilter.setBounds  (kx + 3 * ks, vy2, 58, 80);
+    stutter.setBounds    (kx + 4 * ks, vy2, 58, 80);
+    chorus.setBounds     (kx + 5 * ks, vy2, 58, 80);
+    width.setBounds      (kx + 6 * ks, vy2, 58, 80);
+
+    // GHOST VOICE (838,530,392,214)
+    const int gx = 854, gy = 600, gw = 70;
+    ghostAmt.setBounds   (gx + 0 * gw, gy, 64, 80);
+    ghostSwell.setBounds (gx + 1 * gw, gy, 64, 80);
+    ghostSlide.setBounds (gx + 2 * gw, gy, 64, 80);
+    ghostTone.setBounds  (gx + 3 * gw, gy, 64, 80);
+    ghostMix.setBounds   (gx + 4 * gw, gy, 64, 80);
 }
 
 bool XoxicoaSamplerEditor::keyPressed (const juce::KeyPress& k)

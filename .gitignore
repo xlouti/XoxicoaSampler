@@ -3,3 +3,6 @@ build-*/
 cmake-build-*/
 .DS_Store
 *.zip
+build-linux/
+build-mac/
+sampler_demo/
